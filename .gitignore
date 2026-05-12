@@ -1,0 +1,44 @@
+# 备份文件
+BAK/
+
+# EXE文件（体积大，不纳入Git，用户通过构建脚本生成）
+# 但ver/目录下的EXE是稳定版本，需要上传
+*.exe
+!ver/*.exe
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 构建目录（包含按版本组织的构建脚本和PyInstaller临时文件，不上传远程仓库）
+build/
+
+# PyInstaller其他临时文件
+dist/
+*.spec
+
+# 运行时配置（用户本地生成，存放在app/子目录下）
+cleanup_settings.json
+scan_results.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 虚拟环境
+.venv/
+venv/
+
+# 日志
+*.log
+
+# 旧版代码目录
+云集智能文件清理/

@@ -1,0 +1,28 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 0, 0, 0),
+    prodvers=(0, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0,0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'080404b0',
+      [StringStruct(u'CompanyName', u'YunJi'),
+      StringStruct(u'FileDescription', u'云集智能文件清理专家'),
+      StringStruct(u'FileVersion', u'0.0.0.0'),
+      StringStruct(u'InternalName', u'yunji_cleanup'),
+      StringStruct(u'LegalCopyright', u'Copyright (C) 2026 YunJi'),
+      StringStruct(u'OriginalFilename', u'云集智能文件清理专家.exe'),
+      StringStruct(u'ProductName', u'云集智能文件清理专家'),
+      StringStruct(u'ProductVersion', u'0.0.0.0')])
+      ]),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
+  ]
+)
