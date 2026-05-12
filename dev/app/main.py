@@ -16,9 +16,20 @@ import re
 import psutil
 import shutil
 import zipfile
+import io
+
+HAS_MATPLOTLIB = False
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    HAS_MATPLOTLIB = True
+except Exception:
+    pass
 
 VERSION = "DEV"
-VERSION_CHECK_URL = "https://gitee.com/yunjii/cleanup/raw/master/ver/version.json"
+VERSION_CHECK_URL = "https://gitee.com/yunjii/cu/raw/main/dev/ver/version.json"
 APP_NAME = f"云集智能文件清理专家 v{VERSION}"
 
 COLOR_RED = "#CC0000"
@@ -294,6 +305,75 @@ COLUMN_MIN_WIDTHS = {
     "大小": 65, "修改时间": 110, "类型": 55, "分类": 65,
 }
 
+PRESET_RULE_PACKS = {
+    "windows_basic": {
+        "name": "Windows基础清理",
+        "desc": "系统临时文件、更新缓存、错误报告",
+        "categories": ["temp", "cache", "crash_dump", "empty_folders"],
+        "extensions": {".tmp": "系统临时文件", ".temp": "临时文件", ".log": "日志文件",
+                       ".bak": "备份文件", ".old": "旧文件", ".dmp": "内存转储",
+                       ".crash": "崩溃报告", ".cache": "缓存文件", ".thumb": "缩略图缓存"},
+    },
+    "windows_deep": {
+        "name": "Windows深度清理",
+        "desc": "基础清理+数据库缓存、索引文件、崩溃转储",
+        "categories": ["temp", "cache", "db_cache", "data_file", "crash_dump", "empty_folders"],
+        "extensions": {".tmp": "系统临时文件", ".temp": "临时文件", ".log": "日志文件",
+                       ".bak": "备份文件", ".old": "旧文件", ".db": "数据库缓存",
+                       ".sqlite": "SQLite缓存", ".sqlite3": "SQLite缓存", ".dat": "数据文件",
+                       ".idx": "索引文件", ".dmp": "内存转储", ".crash": "崩溃报告",
+                       ".cache": "缓存文件", ".thumb": "缩略图缓存", ".thumbnail": "缩略图",
+                       "Thumbs.db": "系统缩略图缓存", "Desktop.ini": "桌面配置文件",
+                       "iconcache.db": "图标缓存"},
+    },
+    "browser_cache": {
+        "name": "浏览器缓存清理",
+        "desc": "Chrome/Edge/Firefox等浏览器缓存、Cookie、历史记录",
+        "categories": ["sys_cache", "db_cache"],
+        "extensions": {".cache": "浏览器缓存", ".sqlite": "浏览器数据库", ".sqlite3": "浏览器数据",
+                       ".db": "浏览器缓存", ".log": "浏览器日志"},
+        "system_files": {"Web Data": "浏览器数据", "History": "浏览历史",
+                        "Cookies": "Cookie文件", "Local Storage": "本地存储"},
+    },
+    "download_cleaner": {
+        "name": "下载工具清理",
+        "desc": "迅雷/浏览器/电驴等下载工具临时文件和链接",
+        "categories": ["download_group", "thunder", "browser_dl", "dl_links", "emule_tmp"],
+        "extensions": {".td": "迅雷未完成", ".ttd": "迅雷临时", ".xltd": "迅雷极速版",
+                       ".torrent": "种子文件", ".magnet": "磁链文件", ".download": "浏览器下载",
+                       ".crdownload": "Chrome下载", ".part": "部分下载",
+                       ".part.met": "电驴元数据", ".met": "电驴元数据"},
+    },
+    "dev_tools": {
+        "name": "开发者工具清理",
+        "desc": "IDE缓存、Node_modules、Python缓存、编译临时文件",
+        "categories": ["temp", "cache", "db_cache"],
+        "extensions": {".pyc": "Python编译", ".pyo": "Python优化", ".class": "Java编译",
+                       ".o": "C/C++目标文件", ".obj": "编译目标", ".log": "构建日志",
+                       ".cache": "工具缓存", ".tmp": "临时文件"},
+        "name_patterns": [(r'^__pycache__$', 'Python缓存'), (r'^node_modules$', 'Node模块')],
+    },
+    "ad_tracker": {
+        "name": "广告追踪清理",
+        "desc": "广告脚本、追踪数据、广告图片和链接",
+        "categories": ["ads", "ad_file", "track_data", "ad_image", "ad_link"],
+        "extensions": {".ad": "广告文件", ".ads": "广告脚本", ".tracking": "追踪文件",
+                       ".analytics": "分析数据", ".metrics": "度量数据"},
+        "image_patterns": [r'.*banner.*\.(jpg|jpeg|png|gif|webp|bmp|svg)$',
+                          r'.*ad[_\-].*\.(jpg|jpeg|png|gif|webp|bmp|svg)$',
+                          r'.*promo.*\.(jpg|jpeg|png|gif|webp|bmp|svg)$'],
+    },
+    "game_temp": {
+        "name": "游戏临时文件",
+        "desc": "游戏缓存、着色器缓存、游戏日志",
+        "categories": ["temp", "cache"],
+        "extensions": {".tmp": "游戏临时文件", ".cache": "游戏缓存", ".log": "游戏日志",
+                       ".shadercache": "着色器缓存", ".loc": "本地化缓存"},
+        "name_patterns": [(r'.*shader.?cache.*', '着色器缓存'),
+                         (r'.*unreal.?engine.*temp.*', 'UE临时文件')],
+    },
+}
+
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -469,12 +549,21 @@ class GarbageCleanupTool:
         self._delete_settings_frame = None
         self._color_settings_visible = False
         self._color_settings_frame = None
+        self._preset_rules_visible = False
+        self._preset_rules_frame = None
 
         self.preset_vars = {}
         self._prev_column_widths = {}
         self._cat_rows = []
         self._cat_child_rows = {}
         self._cat_color_btns = {}
+        self._cat_tag_frames = {}
+        self._child_checkboxes = {}
+        self._cat_toggle_btns = {}
+        self._all_expanded = False
+        self._active_rule_packs = set(self.settings.get("active_rule_packs", ["windows_basic"]))
+        self._chart_images = {}
+        self._chart_labels = {}
 
         self.setup_ui()
         self._set_icon()
@@ -616,15 +705,16 @@ class GarbageCleanupTool:
         func_row = ctk.CTkFrame(func_frame, fg_color="#1e1e1e")
         func_row.pack(fill="x", padx=8, pady=6)
 
-        ctk.CTkLabel(func_row, text="快捷功能", font=ctk.CTkFont(size=12, weight="bold"),
+        ctk.CTkLabel(func_row, text="功能设置", font=ctk.CTkFont(size=12, weight="bold"),
                     text_color=COLOR_DIM).pack(side="left", padx=(0, 8))
 
         func_buttons = [
-            ("🔍 重复检测", self.start_duplicate_scan),
-            ("✅ 校验结果", self.verify_results),
+            ("� 预设规则", self.toggle_preset_rules_panel),
             ("⚙ 扫描设置", self.toggle_settings_panel),
             ("🗑 删除设置", self.toggle_delete_settings_panel),
             ("🎨 分类颜色", self.toggle_color_settings_panel),
+            ("🔍 重复检测", self.start_duplicate_scan),
+            ("✅ 校验结果", self.verify_results),
         ]
         for text, cmd in func_buttons:
             ctk.CTkButton(func_row, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
@@ -1093,6 +1183,78 @@ class GarbageCleanupTool:
             self.toggle_delete_settings_panel()
         if keep != "color" and self._color_settings_visible:
             self.toggle_color_settings_panel()
+        if keep != "preset" and self._preset_rules_visible:
+            self.toggle_preset_rules_panel()
+
+    def toggle_preset_rules_panel(self):
+        self._close_other_panels("preset")
+        if self._preset_rules_visible:
+            if self._preset_rules_frame:
+                self._preset_rules_frame.destroy()
+                self._preset_rules_frame = None
+            self._preset_rules_visible = False
+            return
+        self._preset_rules_visible = True
+        self._preset_rules_frame = ctk.CTkFrame(self.cat_frame, fg_color="#252525", border_color="#444", border_width=1)
+        self._preset_rules_frame.pack(fill="x", padx=10, pady=(0, 8))
+
+        ctk.CTkLabel(self._preset_rules_frame, text="预设规则包", font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(8, 4))
+
+        rules_container = ctk.CTkFrame(self._preset_rules_frame, fg_color="#252525")
+        rules_container.pack(fill="x", padx=10, pady=4)
+
+        self._rule_check_vars = {}
+        for rule_id, rule_info in PRESET_RULE_PACKS.items():
+            row = ctk.CTkFrame(rules_container, fg_color="#252525")
+            row.pack(fill="x", pady=2)
+
+            is_active = rule_id in self._active_rule_packs
+            var = ctk.BooleanVar(value=is_active)
+            self._rule_check_vars[rule_id] = var
+
+            ctk.CTkCheckBox(row, text=rule_info["name"], variable=var, fg_color=COLOR_RED,
+                          hover_color=COLOR_RED_LIGHT, checkmark_color=COLOR_TEXT,
+                          text_color=COLOR_TEXT, font=ctk.CTkFont(size=11),
+                          command=lambda rid=rule_id: self._on_rule_pack_toggle(rid)).pack(side="left", padx=(0, 6))
+
+            ctk.CTkLabel(row, text=rule_info["desc"], font=ctk.CTkFont(size=10),
+                        text_color=COLOR_DIM).pack(side="left")
+
+        btn_row = ctk.CTkFrame(self._preset_rules_frame, fg_color="#252525")
+        btn_row.pack(fill="x", padx=10, pady=(4, 8))
+
+        def save_rules():
+            self._active_rule_packs = {rid for rid, v in self._rule_check_vars.items() if v.get()}
+            self.settings["active_rule_packs"] = list(self._active_rule_packs)
+            self._apply_rule_packs()
+            save_settings(self.settings)
+            self.toggle_preset_rules_panel()
+
+        ctk.CTkButton(btn_row, text="全选", height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12),
+                     command=lambda: [v.set(True) for v in self._rule_check_vars.values()]).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(btn_row, text="全不选", height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12),
+                     command=lambda: [v.set(False) for v in self._rule_check_vars.values()]).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_rules).pack(side="left", padx=5)
+
+    def _on_rule_pack_toggle(self, rule_id):
+        if self._rule_check_vars[rule_id].get():
+            self._active_rule_packs.add(rule_id)
+        else:
+            self._active_rule_packs.discard(rule_id)
+
+    def _apply_rule_packs(self):
+        active_categories = set()
+        for rule_id in self._active_rule_packs:
+            rule = PRESET_RULE_PACKS.get(rule_id, {})
+            for cat in rule.get("categories", []):
+                active_categories.add(cat)
+        for cat_id, var in self.preset_vars.items():
+            var.set(cat_id in active_categories or cat_id == "custom")
+        self.on_category_toggle()
 
     def _browse_move_dir(self):
         d = filedialog.askdirectory(title="选择移动目标文件夹")
@@ -1104,7 +1266,14 @@ class GarbageCleanupTool:
         table_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
         table_frame.pack(fill="both", expand=True, padx=10, pady=(2, 0))
 
-        tree_container = tk.Frame(table_frame, bg=COLOR_BG)
+        left_frame = ctk.CTkFrame(table_frame, fg_color=COLOR_BG, border_width=0)
+        left_frame.pack(side="left", fill="both", expand=True)
+
+        right_frame = ctk.CTkFrame(table_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1, width=320)
+        right_frame.pack(side="right", fill="both", padx=(5, 0))
+        right_frame.pack_propagate(False)
+
+        tree_container = tk.Frame(left_frame, bg=COLOR_BG)
         tree_container.pack(fill="both", expand=True)
 
         self.scrollbar_y = ttk.Scrollbar(tree_container, orient="vertical", style="Dark.Vertical.TScrollbar")
@@ -1142,6 +1311,26 @@ class GarbageCleanupTool:
         self.tree.bind("<ButtonPress-1>", self._on_col_press)
         self.tree.bind("<ButtonRelease-1>", self._on_col_release)
         self.tree.bind("<Motion>", self._on_col_motion)
+
+        self._setup_analysis_panel(right_frame)
+
+    def _setup_analysis_panel(self, parent):
+        ctk.CTkLabel(parent, text="📊 数据分析", font=ctk.CTkFont(size=13, weight="bold"),
+                    text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(10, 5))
+
+        self._chart_canvas = tk.Canvas(parent, bg="#1e1e1e", highlightthickness=0, width=300, height=280)
+        self._chart_canvas.pack(fill="both", expand=True, padx=10, pady=5)
+
+        self._analysis_frame = ctk.CTkFrame(parent, fg_color="#1e1e1e")
+        self._analysis_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        self._analysis_text = ctk.CTkTextbox(self._analysis_frame, height=200, fg_color="#252525",
+                                            border_color="#444", border_width=1, text_color=COLOR_TEXT,
+                                            font=ctk.CTkFont(size=11))
+        self._analysis_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self._analysis_text.configure(state="disabled")
+
+        self._update_analysis()
 
     def _on_yscroll(self, first, last):
         self.scrollbar_y.set(float(first), float(last))
@@ -1598,6 +1787,7 @@ class GarbageCleanupTool:
         tsm = round(self.total_size / (1024*1024), 2)
         self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB")
         self._update_selected_size_display()
+        self._update_analysis()
 
     def clear_table(self):
         for item in self.tree.get_children():
@@ -1866,6 +2056,131 @@ class GarbageCleanupTool:
         else:
             self.filtered_files.sort(key=lambda x: x.get(col, ""), reverse=self.sort_reverse)
         self.display_files()
+
+    def _update_analysis(self):
+        try:
+            if not hasattr(self, '_chart_canvas') or self._chart_canvas is None:
+                return
+            if not self.file_list:
+                self._draw_empty_chart()
+                self._show_placeholder("暂无数据，请先扫描目录")
+                return
+            self._draw_category_pie()
+            self._generate_recommendations()
+        except Exception:
+            pass
+
+    def _draw_empty_chart(self):
+        self._chart_canvas.delete("all")
+        self._chart_canvas.create_text(150, 140, text="📊 等待扫描...",
+                                      fill=COLOR_DIM, font=ctk.CTkFont(size=14))
+
+    def _show_placeholder(self, msg):
+        self._analysis_text.configure(state="normal")
+        self._analysis_text.delete("1.0", "end")
+        self._analysis_text.insert("end", msg)
+        self._analysis_text.configure(state="disabled")
+
+    def _draw_category_pie(self):
+        cat_sizes = {}
+        for fi in self.filtered_files:
+            cat = fi.get("category", "其他")
+            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
+        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
+        if not sorted_cats:
+            self._draw_empty_chart()
+            return
+        top_cats = sorted_cats[:8]
+        other_size = sum(s for _, s in sorted_cats[8:])
+        if other_size > 0:
+            top_cats.append(("其他", other_size))
+
+        labels = [f"{c}\n{self._format_bytes(s)}" for c, s in top_cats]
+        sizes = [s for _, s in top_cats]
+        colors_list = ["#cc4444", "#cc7744", "#cccc44", "#77cc44", "#44cccc", "#4477cc", "#7744cc", "#cc44cc", "#888888"]
+
+        fig, ax = plt.subplots(figsize=(3.5, 2.8), facecolor="#1e1e1e")
+        ax.set_facecolor("#1e1e1e")
+        wedges, texts, autotexts = ax.pie(sizes, labels=labels, colors=colors_list[:len(labels)],
+                              autopct="%1.1f%%", textprops={"color": COLOR_TEXT, "fontsize": 8},
+                              pctdistance=0.8, startangle=90)
+        for t in texts:
+            t.set_fontsize(8)
+        for t in autotexts:
+            t.set_fontsize(7)
+            t.set_color(COLOR_TEXT)
+        ax.set_title("文件分类占比", color=COLOR_TEXT, fontsize=11, pad=8)
+        fig.tight_layout(pad=1)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+        buf.seek(0)
+        plt.close(fig)
+
+        img = Image.open(buf)
+        img = img.resize((290, 250), Image.Resampling.LANCZOS)
+        self._chart_photo = ImageTk.PhotoImage(img)
+        self._chart_canvas.delete("all")
+        self._chart_canvas.create_image(145, 125, image=self._chart_photo)
+
+    def _generate_recommendations(self):
+        cat_sizes = {}
+        cat_counts = {}
+        for fi in self.filtered_files:
+            cat = fi.get("category", "其他")
+            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+
+        total_size = sum(cat_sizes.values())
+        total_count = sum(cat_counts.values())
+
+        recommendations = []
+        recommendations.append(f"📋 扫描统计")
+        recommendations.append(f"   总文件数: {total_count}")
+        recommendations.append(f"   总大小: {self._format_bytes(total_size)}")
+        recommendations.append("")
+
+        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
+        if sorted_cats:
+            top_cat, top_size = sorted_cats[0]
+            recommendations.append(f"💡 建议处理方案:")
+            recommendations.append(f"   1. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
+            if top_size > 1024 * 1024 * 1024:
+                recommendations.append(f"      → 建议优先清理，可释放 >1GB 空间")
+            elif top_size > 100 * 1024 * 1024:
+                recommendations.append(f"      → 建议清理，可释放 >100MB 空间")
+
+        if cat_counts.get("duplicates", 0) > 0:
+            recommendations.append(f"   2. 发现 {cat_counts['duplicates']} 个重复文件")
+            recommendations.append(f"      → 使用'重复检测'功能去重")
+
+        if cat_counts.get("empty_folders", 0) > 10:
+            recommendations.append(f"   3. 发现 {cat_counts['empty_folders']} 个空文件夹")
+            recommendations.append(f"      → 可安全批量删除")
+
+        if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
+            recommendations.append(f"   4. 缓存文件较多")
+            recommendations.append(f"      → 建议定期清理缓存")
+
+        recommendations.append("")
+        recommendations.append("⚠️ 清理注意事项:")
+        recommendations.append("   - 清理前建议备份重要文件")
+        recommendations.append("   - 系统文件谨慎处理")
+        recommendations.append("   - 建议使用'删除到回收站'更安全")
+
+        self._analysis_text.configure(state="normal")
+        self._analysis_text.delete("1.0", "end")
+        for line in recommendations:
+            self._analysis_text.insert("end", line + "\n")
+        self._analysis_text.configure(state="disabled")
+
+    def _format_bytes(self, size_bytes):
+        if size_bytes == 0: return "0 B"
+        names = ['B', 'KB', 'MB', 'GB', 'TB']
+        i = 0
+        while size_bytes >= 1024 and i < len(names) - 1:
+            size_bytes /= 1024; i += 1
+        return f"{round(size_bytes, 2)} {names[i]}"
 
 
 def main():
