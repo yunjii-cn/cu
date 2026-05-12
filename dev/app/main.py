@@ -17,6 +17,7 @@ import psutil
 import shutil
 import zipfile
 import io
+import math
 
 HAS_MATPLOTLIB = False
 try:
@@ -547,8 +548,6 @@ class GarbageCleanupTool:
         self._settings_frame = None
         self._delete_settings_visible = False
         self._delete_settings_frame = None
-        self._color_settings_visible = False
-        self._color_settings_frame = None
         self._preset_rules_visible = False
         self._preset_rules_frame = None
 
@@ -564,6 +563,9 @@ class GarbageCleanupTool:
         self._active_rule_packs = set(self.settings.get("active_rule_packs", ["windows_basic"]))
         self._chart_images = {}
         self._chart_labels = {}
+
+        for rule_id, rule_data in self.settings.get("custom_rule_packs", {}).items():
+            PRESET_RULE_PACKS[rule_id] = rule_data
 
         self.setup_ui()
         self._set_icon()
@@ -689,6 +691,8 @@ class GarbageCleanupTool:
                      fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(size=13)).pack(side="left", padx=3)
         ctk.CTkButton(control_frame, text="🔍 扫描", font=ctk.CTkFont(size=13, weight="bold"), height=34,
                      fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, command=self.start_scan).pack(side="left", padx=3)
+        ctk.CTkButton(control_frame, text="🔍 重复检测", height=34, command=self.start_duplicate_scan,
+                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(size=13)).pack(side="left", padx=3)
         self.stop_button = ctk.CTkButton(control_frame, text="⏹ 停止", height=34, command=self.stop_scan,
                                         state="disabled", fg_color="#333", hover_color=COLOR_RED,
                                         text_color=COLOR_TEXT, font=ctk.CTkFont(size=13))
@@ -709,16 +713,18 @@ class GarbageCleanupTool:
                     text_color=COLOR_DIM).pack(side="left", padx=(0, 8))
 
         func_buttons = [
-            ("� 预设规则", self.toggle_preset_rules_panel),
+            ("📋 预设规则", self.toggle_preset_rules_panel),
             ("⚙ 扫描设置", self.toggle_settings_panel),
             ("🗑 删除设置", self.toggle_delete_settings_panel),
-            ("🎨 分类颜色", self.toggle_color_settings_panel),
-            ("🔍 重复检测", self.start_duplicate_scan),
-            ("✅ 校验结果", self.verify_results),
+            ("📊 分析报告", self.toggle_analysis_report),
         ]
         for text, cmd in func_buttons:
             ctk.CTkButton(func_row, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
                          text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=cmd).pack(side="left", padx=3)
+
+        self._panel_container = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
+        self._panel_container.pack(fill="x", padx=10)
+        self._panel_container.pack_forget()
 
         self.cat_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
         self.cat_frame.pack(fill="x", padx=10, pady=2)
@@ -908,12 +914,6 @@ class GarbageCleanupTool:
                      fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT,
                      font=ctk.CTkFont(size=11)).pack(side="left")
 
-        self.rules_list_frame = ctk.CTkFrame(self.custom_frame, height=36,
-                                                      fg_color="#1e1e1e", border_color="#333",
-                                                      border_width=1)
-        self.rules_list_frame.pack(fill="x", padx=8, pady=(0, 6))
-        self.rules_list_frame.pack_propagate(False)
-
         self._rebuild_rules_display()
         self.update_scan_conditions()
 
@@ -1012,12 +1012,14 @@ class GarbageCleanupTool:
                 self._settings_frame.destroy()
                 self._settings_frame = None
             self._settings_visible = False
+            self._hide_panel_container()
             return
+        self._show_panel_container()
         self._settings_visible = True
         sys_info = self.settings.get("sys_info", get_system_info())
         rec = self.settings.get("recommended", recommend_params(sys_info))
-        self._settings_frame = ctk.CTkFrame(self.cat_frame, fg_color="#252525", border_color="#444", border_width=1)
-        self._settings_frame.pack(fill="x", padx=10, pady=(0, 8))
+        self._settings_frame = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
+        self._settings_frame.pack(fill="x", pady=(0, 4))
         hw_row = ctk.CTkFrame(self._settings_frame, fg_color="#252525")
         hw_row.pack(fill="x", padx=10, pady=(8, 4))
         ctk.CTkLabel(hw_row, text=f"💻 {sys_info['total_ram_gb']}GB | {sys_info['cpu_physical']}核{sys_info['cpu_logical']}线程",
@@ -1071,10 +1073,12 @@ class GarbageCleanupTool:
                 self._delete_settings_frame.destroy()
                 self._delete_settings_frame = None
             self._delete_settings_visible = False
+            self._hide_panel_container()
             return
+        self._show_panel_container()
         self._delete_settings_visible = True
-        self._delete_settings_frame = ctk.CTkFrame(self.cat_frame, fg_color="#252525", border_color="#444", border_width=1)
-        self._delete_settings_frame.pack(fill="x", padx=10, pady=(0, 8))
+        self._delete_settings_frame = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
+        self._delete_settings_frame.pack(fill="x", pady=(0, 4))
         mode_row = ctk.CTkFrame(self._delete_settings_frame, fg_color="#252525")
         mode_row.pack(fill="x", padx=10, pady=(8, 4))
         ctk.CTkLabel(mode_row, text="删除方式", font=ctk.CTkFont(size=12, weight="bold"), text_color=COLOR_TEXT).pack(side="left", padx=(0, 10))
@@ -1115,76 +1119,21 @@ class GarbageCleanupTool:
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_del).pack(side="left", padx=5)
 
-    def toggle_color_settings_panel(self):
-        self._close_other_panels("color")
-        if self._color_settings_visible:
-            if self._color_settings_frame:
-                self._color_settings_frame.destroy()
-                self._color_settings_frame = None
-            self._color_settings_visible = False
-            return
-        self._color_settings_visible = True
-        self._color_settings_frame = ctk.CTkFrame(self.cat_frame, fg_color="#252525", border_color="#444", border_width=1)
-        self._color_settings_frame.pack(fill="x", padx=10, pady=(0, 8))
-        ctk.CTkLabel(self._color_settings_frame, text="分类背景颜色", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(8, 4))
-        self._color_buttons = {}
-        color_row = ctk.CTkFrame(self._color_settings_frame, fg_color="#252525")
-        color_row.pack(fill="x", padx=10, pady=4)
-        for cat_id, color in self.category_colors.items():
-            name = CATEGORY_TREE.get(cat_id, {}).get("name", cat_id)
-            item_frame = ctk.CTkFrame(color_row, fg_color="#252525")
-            item_frame.pack(side="left", padx=3, pady=2)
-            ctk.CTkLabel(item_frame, text=name, font=ctk.CTkFont(size=11), text_color=COLOR_TEXT).pack(side="left", padx=(0, 3))
-            btn = ctk.CTkButton(item_frame, text="  ", width=28, height=20, fg_color=color, hover_color=color,
-                              command=lambda cid=cat_id: self._pick_color(cid))
-            btn.pack(side="left")
-            self._color_buttons[cat_id] = btn
-        btn_row = ctk.CTkFrame(self._color_settings_frame, fg_color="#252525")
-        btn_row.pack(fill="x", padx=10, pady=(4, 8))
+    def _show_panel_container(self):
+        self._panel_container.pack(fill="x", padx=10, before=self.cat_frame)
 
-        def reset_c():
-            self.category_colors = CATEGORY_COLORS_DEFAULT.copy()
-            self.settings["category_colors"] = self.category_colors
-            save_settings(self.settings)
-            self._apply_tag_styles()
-            self.display_files()
-            self.toggle_color_settings_panel()
-
-        def save_c():
-            self.settings["category_colors"] = self.category_colors
-            save_settings(self.settings)
-            self._apply_tag_styles()
-            self.display_files()
-            self.toggle_color_settings_panel()
-
-        ctk.CTkButton(btn_row, text="恢复默认", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=reset_c).pack(side="left", padx=(0, 5))
-        ctk.CTkButton(btn_row, text="保存并应用", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_c).pack(side="left", padx=5)
-
-    def _pick_color(self, cat_id):
-        current = self.category_colors.get(cat_id, COLOR_BG)
-        result = colorchooser.askcolor(color=current, title="选择颜色")
-        if result and result[1]:
-            self.category_colors[cat_id] = result[1]
-            if cat_id in self._color_buttons:
-                self._color_buttons[cat_id].configure(fg_color=result[1], hover_color=result[1])
-
-    def _apply_tag_styles(self):
-        for cat_id, color in self.category_colors.items():
-            tag_name = f"cat_{cat_id}"
-            self.tree.tag_configure(tag_name, background=color, foreground=COLOR_TEXT)
+    def _hide_panel_container(self):
+        self._panel_container.pack_forget()
 
     def _close_other_panels(self, keep):
         if keep != "settings" and self._settings_visible:
             self.toggle_settings_panel()
         if keep != "delete" and self._delete_settings_visible:
             self.toggle_delete_settings_panel()
-        if keep != "color" and self._color_settings_visible:
-            self.toggle_color_settings_panel()
         if keep != "preset" and self._preset_rules_visible:
             self.toggle_preset_rules_panel()
+        if keep != "analysis" and self._analysis_visible:
+            self.toggle_analysis_report()
 
     def toggle_preset_rules_panel(self):
         self._close_other_panels("preset")
@@ -1193,10 +1142,12 @@ class GarbageCleanupTool:
                 self._preset_rules_frame.destroy()
                 self._preset_rules_frame = None
             self._preset_rules_visible = False
+            self._hide_panel_container()
             return
+        self._show_panel_container()
         self._preset_rules_visible = True
-        self._preset_rules_frame = ctk.CTkFrame(self.cat_frame, fg_color="#252525", border_color="#444", border_width=1)
-        self._preset_rules_frame.pack(fill="x", padx=10, pady=(0, 8))
+        self._preset_rules_frame = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
+        self._preset_rules_frame.pack(fill="x", pady=(0, 4))
 
         ctk.CTkLabel(self._preset_rules_frame, text="预设规则包", font=ctk.CTkFont(size=12, weight="bold"),
                     text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(8, 4))
@@ -1239,6 +1190,10 @@ class GarbageCleanupTool:
                      command=lambda: [v.set(False) for v in self._rule_check_vars.values()]).pack(side="left", padx=(0, 5))
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_rules).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="📁 导入规则", height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=self._import_custom_rule_pack).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="📤 导出规则", height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=self._export_custom_rule_pack).pack(side="left", padx=5)
 
     def _on_rule_pack_toggle(self, rule_id):
         if self._rule_check_vars[rule_id].get():
@@ -1256,6 +1211,52 @@ class GarbageCleanupTool:
             var.set(cat_id in active_categories or cat_id == "custom")
         self.on_category_toggle()
 
+    def _import_custom_rule_pack(self):
+        fpath = filedialog.askopenfilename(title="选择规则包文件", filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")])
+        if not fpath:
+            return
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or "name" not in data or "categories" not in data:
+                messagebox.showerror("导入失败", "无效的规则包格式，需包含name和categories字段")
+                return
+            rule_id = f"custom_{int(time.time())}"
+            PRESET_RULE_PACKS[rule_id] = data
+            self._active_rule_packs.add(rule_id)
+            self.settings["active_rule_packs"] = list(self._active_rule_packs)
+            custom_packs = self.settings.get("custom_rule_packs", {})
+            custom_packs[rule_id] = data
+            self.settings["custom_rule_packs"] = custom_packs
+            save_settings(self.settings)
+            self.toggle_preset_rules_panel()
+            messagebox.showinfo("导入成功", f"规则包 '{data['name']}' 已导入")
+        except Exception as e:
+            messagebox.showerror("导入失败", f"读取文件出错: {e}")
+
+    def _export_custom_rule_pack(self):
+        fpath = filedialog.asksaveasfilename(title="导出规则包", defaultextension=".json",
+                                            filetypes=[("JSON文件", "*.json")])
+        if not fpath:
+            return
+        export_data = {}
+        for rule_id in self._active_rule_packs:
+            rule = PRESET_RULE_PACKS.get(rule_id, {})
+            if rule:
+                export_data[rule_id] = rule
+        if not export_data:
+            messagebox.showwarning("导出失败", "没有已激活的规则包可导出")
+            return
+        try:
+            merged = {"name": "自定义规则包", "desc": "导出的规则包合集",
+                     "categories": list(set(c for rid, r in export_data.items() for c in r.get("categories", []))),
+                     "extensions": {k: v for rid, r in export_data.items() for k, v in r.get("extensions", {}).items()}}
+            with open(fpath, 'w', encoding='utf-8') as f:
+                json.dump(merged, f, ensure_ascii=False, indent=2)
+            messagebox.showinfo("导出成功", f"规则包已导出到: {fpath}")
+        except Exception as e:
+            messagebox.showerror("导出失败", f"写入文件出错: {e}")
+
     def _browse_move_dir(self):
         d = filedialog.askdirectory(title="选择移动目标文件夹")
         if d:
@@ -1266,14 +1267,7 @@ class GarbageCleanupTool:
         table_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
         table_frame.pack(fill="both", expand=True, padx=10, pady=(2, 0))
 
-        left_frame = ctk.CTkFrame(table_frame, fg_color=COLOR_BG, border_width=0)
-        left_frame.pack(side="left", fill="both", expand=True)
-
-        right_frame = ctk.CTkFrame(table_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1, width=320)
-        right_frame.pack(side="right", fill="both", padx=(5, 0))
-        right_frame.pack_propagate(False)
-
-        tree_container = tk.Frame(left_frame, bg=COLOR_BG)
+        tree_container = tk.Frame(table_frame, bg=COLOR_BG)
         tree_container.pack(fill="both", expand=True)
 
         self.scrollbar_y = ttk.Scrollbar(tree_container, orient="vertical", style="Dark.Vertical.TScrollbar")
@@ -1312,25 +1306,179 @@ class GarbageCleanupTool:
         self.tree.bind("<ButtonRelease-1>", self._on_col_release)
         self.tree.bind("<Motion>", self._on_col_motion)
 
-        self._setup_analysis_panel(right_frame)
+    def toggle_analysis_report(self):
+        if self._analysis_visible:
+            if self._analysis_overlay:
+                self._analysis_overlay.destroy()
+                self._analysis_overlay = None
+            self._analysis_visible = False
+            self._hide_panel_container()
+            return
+        self._show_panel_container()
+        self._analysis_visible = True
+        self._analysis_overlay = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
+        self._analysis_overlay.pack(fill="x", pady=(0, 4))
 
-    def _setup_analysis_panel(self, parent):
-        ctk.CTkLabel(parent, text="📊 数据分析", font=ctk.CTkFont(size=13, weight="bold"),
-                    text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(10, 5))
+        top_row = ctk.CTkFrame(self._analysis_overlay, fg_color="#252525")
+        top_row.pack(fill="x", padx=10, pady=(8, 4))
+        ctk.CTkLabel(top_row, text="📊 分析报告", font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left", padx=5)
+        ctk.CTkButton(top_row, text="✅ 校验结果", height=22, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=11),
+                     command=self._verify_and_update_report).pack(side="left", padx=5)
+        ctk.CTkButton(top_row, text="✕", width=24, height=24, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_DIM, font=ctk.CTkFont(size=11),
+                     command=self.toggle_analysis_report).pack(side="right", padx=5)
 
-        self._chart_canvas = tk.Canvas(parent, bg="#1e1e1e", highlightthickness=0, width=300, height=280)
-        self._chart_canvas.pack(fill="both", expand=True, padx=10, pady=5)
+        content_row = ctk.CTkFrame(self._analysis_overlay, fg_color="#252525")
+        content_row.pack(fill="x", padx=10, pady=(0, 8))
 
-        self._analysis_frame = ctk.CTkFrame(parent, fg_color="#1e1e1e")
-        self._analysis_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        self._report_chart = tk.Canvas(content_row, bg="#252525", highlightthickness=0, width=200, height=200)
+        self._report_chart.pack(side="left", padx=(0, 10))
 
-        self._analysis_text = ctk.CTkTextbox(self._analysis_frame, height=200, fg_color="#252525",
-                                            border_color="#444", border_width=1, text_color=COLOR_TEXT,
-                                            font=ctk.CTkFont(size=11))
-        self._analysis_text.pack(fill="both", expand=True, padx=5, pady=5)
-        self._analysis_text.configure(state="disabled")
+        report_text = ctk.CTkTextbox(content_row, fg_color="#2a2a2a", width=500,
+                                    border_color="#444", border_width=1, text_color=COLOR_TEXT,
+                                    font=ctk.CTkFont(size=11), height=200)
+        report_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
-        self._update_analysis()
+        self._draw_report_pie(self._report_chart)
+        content = self._build_report_content()
+        report_text.insert("end", content)
+        report_text.configure(state="disabled")
+        self._report_text_widget = report_text
+
+    def _draw_report_pie(self, canvas):
+        cat_sizes = {}
+        for fi in self.filtered_files:
+            cat = fi.get("category", "其他")
+            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
+        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
+        if not sorted_cats:
+            canvas.create_text(100, 100, text="暂无数据", fill=COLOR_DIM, font=("Arial", 12))
+            return
+        top_cats = sorted_cats[:6]
+        other_size = sum(s for _, s in sorted_cats[6:])
+        if other_size > 0:
+            top_cats.append(("其他", other_size))
+        total = sum(s for _, s in top_cats)
+        colors_list = ["#cc4444", "#cc8844", "#cccc44", "#44cc88", "#4488cc", "#8844cc", "#888888"]
+        canvas.delete("all")
+        cx, cy, r = 100, 90, 70
+        start_angle = 90
+        for i, (cat, size) in enumerate(top_cats):
+            extent = (size / total) * 360 if total > 0 else 0
+            color = colors_list[i % len(colors_list)]
+            canvas.create_arc(cx - r, cy - r, cx + r, cy + r,
+                            start=start_angle, extent=extent,
+                            fill=color, outline="#252525", width=2, style="pieslice")
+            mid_angle = start_angle + extent / 2
+            if extent > 15:
+                pct = (size / total) * 100
+                tx = cx + (r * 0.6) * math.cos(math.radians(mid_angle))
+                ty = cy - (r * 0.6) * math.sin(math.radians(mid_angle))
+                canvas.create_text(tx, ty, text=f"{pct:.0f}%", fill="white", font=("Arial", 8, "bold"))
+            start_angle += extent
+        canvas.create_text(cx, cy - r - 10, text="分类占比", fill=COLOR_TEXT, font=("Arial", 10, "bold"))
+        ly = cy + r + 12
+        for i, (cat, size) in enumerate(top_cats):
+            color = colors_list[i % len(colors_list)]
+            canvas.create_rectangle(5, ly, 15, ly + 8, fill=color, outline="")
+            pct = (size / total) * 100 if total > 0 else 0
+            canvas.create_text(18, ly + 4, text=f"{cat} {self._format_bytes(size)}", fill=COLOR_TEXT, font=("Arial", 8), anchor="w")
+            ly += 13
+
+    def _build_report_content(self):
+        cat_sizes = {}
+        cat_counts = {}
+        for fi in self.filtered_files:
+            cat = fi.get("category", "其他")
+            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        total_size = sum(cat_sizes.values())
+        total_count = sum(cat_counts.values())
+
+        lines = []
+        lines.append("📋 扫描统计")
+        lines.append(f"   总文件数: {total_count}")
+        lines.append(f"   总大小: {self._format_bytes(total_size)}")
+        lines.append("")
+
+        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
+        if sorted_cats:
+            top_cat, top_size = sorted_cats[0]
+            lines.append("💡 建议处理方案:")
+            lines.append(f"   1. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
+            if top_size > 1024 * 1024 * 1024:
+                lines.append("      → 建议优先清理，可释放 >1GB")
+            elif top_size > 100 * 1024 * 1024:
+                lines.append("      → 建议清理，可释放 >100MB")
+
+        if cat_counts.get("duplicates", 0) > 0:
+            lines.append(f"   2. 发现 {cat_counts['duplicates']} 个重复文件")
+            lines.append("      → 使用'重复检测'功能去重")
+
+        if cat_counts.get("empty_folders", 0) > 10:
+            lines.append(f"   3. 发现 {cat_counts['empty_folders']} 个空文件夹")
+            lines.append("      → 可安全批量删除")
+
+        if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
+            lines.append("   4. 缓存文件较多")
+            lines.append("      → 建议定期清理缓存")
+
+        lines.append("")
+        lines.append("⚠️ 注意事项:")
+        lines.append("   - 清理前建议备份重要文件")
+        lines.append("   - 系统文件谨慎处理")
+        lines.append("   - 建议使用'删除到回收站'")
+
+        return "\n".join(lines)
+
+    def _verify_and_update_report(self):
+        if not self.file_list:
+            return
+        removed = changed = 0
+        valid = []
+        for fi in self.file_list:
+            fp = fi["path"]
+            if not os.path.exists(fp):
+                removed += 1
+                self.selected_files.discard(fp)
+                continue
+            try:
+                st = os.stat(fp)
+                if st.st_size != fi["size"] or st.st_mtime != fi["mtime"]:
+                    fi["size"] = st.st_size
+                    fi["mtime"] = st.st_mtime
+                    changed += 1
+            except Exception:
+                removed += 1
+                self.selected_files.discard(fp)
+                continue
+            valid.append(fi)
+        self.file_list = valid
+        self.filtered_files = valid[:]
+        self.total_size = sum(fi["size"] for fi in valid)
+        self.display_files()
+        self._auto_save_results()
+        self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
+
+        if hasattr(self, '_report_text_widget') and self._report_text_widget:
+            self._report_text_widget.configure(state="normal")
+            self._report_text_widget.delete("1.0", "end")
+            content = self._build_report_content()
+            content += f"\n\n✅ 校验结果:\n   有效: {len(valid)}\n   已删除: {removed}\n   已变更: {changed}"
+            self._report_text_widget.insert("end", content)
+            self._report_text_widget.configure(state="disabled")
+        if hasattr(self, '_report_chart') and self._report_chart:
+            self._draw_report_pie(self._report_chart)
+
+    def _format_bytes(self, size_bytes):
+        if size_bytes == 0: return "0 B"
+        names = ['B', 'KB', 'MB', 'GB', 'TB']
+        i = 0
+        while size_bytes >= 1024 and i < len(names) - 1:
+            size_bytes /= 1024; i += 1
+        return f"{round(size_bytes, 2)} {names[i]}"
 
     def _on_yscroll(self, first, last):
         self.scrollbar_y.set(float(first), float(last))
@@ -1787,7 +1935,6 @@ class GarbageCleanupTool:
         tsm = round(self.total_size / (1024*1024), 2)
         self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB")
         self._update_selected_size_display()
-        self._update_analysis()
 
     def clear_table(self):
         for item in self.tree.get_children():
@@ -1843,16 +1990,22 @@ class GarbageCleanupTool:
         self._auto_save()
 
     def _rebuild_rules_display(self):
-        for w in self.rules_list_frame.winfo_children():
+        if not hasattr(self, '_rules_display_frame'):
+            self._rules_display_frame = ctk.CTkFrame(self.custom_frame, fg_color="#1e1e1e")
+        for w in self._rules_display_frame.winfo_children():
             w.destroy()
+        if not self.custom_rules:
+            self._rules_display_frame.pack_forget()
+            return
+        self._rules_display_frame.pack(fill="x", padx=8, pady=(0, 4))
         labels = {"suffix": "后缀", "regex": "正则", "name_fuzzy": "模糊名", "name_exact": "精确名"}
         for rule in self.custom_rules:
-            rf = ctk.CTkFrame(self.rules_list_frame, fg_color=COLOR_BG, border_color=COLOR_BORDER, border_width=1)
-            rf.pack(fill="x", padx=2, pady=2)
+            rf = ctk.CTkFrame(self._rules_display_frame, fg_color=COLOR_BG, border_color=COLOR_BORDER, border_width=1)
+            rf.pack(fill="x", padx=2, pady=1)
             ctk.CTkLabel(rf, text=f"{rule['text']} [{labels.get(rule['type'], '')}]",
-                        font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=5, pady=2)
-            ctk.CTkButton(rf, text="删除", width=60, command=lambda r=rule: self.remove_custom_rule(r),
-                         fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, border_color=COLOR_BORDER, border_width=1).pack(side="right", padx=5, pady=2)
+                        font=ctk.CTkFont(size=11), text_color=COLOR_TEXT).pack(side="left", padx=5, pady=1)
+            ctk.CTkButton(rf, text="✕", width=22, height=20, command=lambda r=rule: self.remove_custom_rule(r),
+                         fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_DIM, font=ctk.CTkFont(size=10)).pack(side="right", padx=3, pady=1)
 
     def remove_custom_rule(self, rule):
         if rule in self.custom_rules:
@@ -2056,131 +2209,6 @@ class GarbageCleanupTool:
         else:
             self.filtered_files.sort(key=lambda x: x.get(col, ""), reverse=self.sort_reverse)
         self.display_files()
-
-    def _update_analysis(self):
-        try:
-            if not hasattr(self, '_chart_canvas') or self._chart_canvas is None:
-                return
-            if not self.file_list:
-                self._draw_empty_chart()
-                self._show_placeholder("暂无数据，请先扫描目录")
-                return
-            self._draw_category_pie()
-            self._generate_recommendations()
-        except Exception:
-            pass
-
-    def _draw_empty_chart(self):
-        self._chart_canvas.delete("all")
-        self._chart_canvas.create_text(150, 140, text="📊 等待扫描...",
-                                      fill=COLOR_DIM, font=ctk.CTkFont(size=14))
-
-    def _show_placeholder(self, msg):
-        self._analysis_text.configure(state="normal")
-        self._analysis_text.delete("1.0", "end")
-        self._analysis_text.insert("end", msg)
-        self._analysis_text.configure(state="disabled")
-
-    def _draw_category_pie(self):
-        cat_sizes = {}
-        for fi in self.filtered_files:
-            cat = fi.get("category", "其他")
-            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
-        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
-        if not sorted_cats:
-            self._draw_empty_chart()
-            return
-        top_cats = sorted_cats[:8]
-        other_size = sum(s for _, s in sorted_cats[8:])
-        if other_size > 0:
-            top_cats.append(("其他", other_size))
-
-        labels = [f"{c}\n{self._format_bytes(s)}" for c, s in top_cats]
-        sizes = [s for _, s in top_cats]
-        colors_list = ["#cc4444", "#cc7744", "#cccc44", "#77cc44", "#44cccc", "#4477cc", "#7744cc", "#cc44cc", "#888888"]
-
-        fig, ax = plt.subplots(figsize=(3.5, 2.8), facecolor="#1e1e1e")
-        ax.set_facecolor("#1e1e1e")
-        wedges, texts, autotexts = ax.pie(sizes, labels=labels, colors=colors_list[:len(labels)],
-                              autopct="%1.1f%%", textprops={"color": COLOR_TEXT, "fontsize": 8},
-                              pctdistance=0.8, startangle=90)
-        for t in texts:
-            t.set_fontsize(8)
-        for t in autotexts:
-            t.set_fontsize(7)
-            t.set_color(COLOR_TEXT)
-        ax.set_title("文件分类占比", color=COLOR_TEXT, fontsize=11, pad=8)
-        fig.tight_layout(pad=1)
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
-        buf.seek(0)
-        plt.close(fig)
-
-        img = Image.open(buf)
-        img = img.resize((290, 250), Image.Resampling.LANCZOS)
-        self._chart_photo = ImageTk.PhotoImage(img)
-        self._chart_canvas.delete("all")
-        self._chart_canvas.create_image(145, 125, image=self._chart_photo)
-
-    def _generate_recommendations(self):
-        cat_sizes = {}
-        cat_counts = {}
-        for fi in self.filtered_files:
-            cat = fi.get("category", "其他")
-            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
-            cat_counts[cat] = cat_counts.get(cat, 0) + 1
-
-        total_size = sum(cat_sizes.values())
-        total_count = sum(cat_counts.values())
-
-        recommendations = []
-        recommendations.append(f"📋 扫描统计")
-        recommendations.append(f"   总文件数: {total_count}")
-        recommendations.append(f"   总大小: {self._format_bytes(total_size)}")
-        recommendations.append("")
-
-        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
-        if sorted_cats:
-            top_cat, top_size = sorted_cats[0]
-            recommendations.append(f"💡 建议处理方案:")
-            recommendations.append(f"   1. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
-            if top_size > 1024 * 1024 * 1024:
-                recommendations.append(f"      → 建议优先清理，可释放 >1GB 空间")
-            elif top_size > 100 * 1024 * 1024:
-                recommendations.append(f"      → 建议清理，可释放 >100MB 空间")
-
-        if cat_counts.get("duplicates", 0) > 0:
-            recommendations.append(f"   2. 发现 {cat_counts['duplicates']} 个重复文件")
-            recommendations.append(f"      → 使用'重复检测'功能去重")
-
-        if cat_counts.get("empty_folders", 0) > 10:
-            recommendations.append(f"   3. 发现 {cat_counts['empty_folders']} 个空文件夹")
-            recommendations.append(f"      → 可安全批量删除")
-
-        if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
-            recommendations.append(f"   4. 缓存文件较多")
-            recommendations.append(f"      → 建议定期清理缓存")
-
-        recommendations.append("")
-        recommendations.append("⚠️ 清理注意事项:")
-        recommendations.append("   - 清理前建议备份重要文件")
-        recommendations.append("   - 系统文件谨慎处理")
-        recommendations.append("   - 建议使用'删除到回收站'更安全")
-
-        self._analysis_text.configure(state="normal")
-        self._analysis_text.delete("1.0", "end")
-        for line in recommendations:
-            self._analysis_text.insert("end", line + "\n")
-        self._analysis_text.configure(state="disabled")
-
-    def _format_bytes(self, size_bytes):
-        if size_bytes == 0: return "0 B"
-        names = ['B', 'KB', 'MB', 'GB', 'TB']
-        i = 0
-        while size_bytes >= 1024 and i < len(names) - 1:
-            size_bytes /= 1024; i += 1
-        return f"{round(size_bytes, 2)} {names[i]}"
 
 
 def main():
