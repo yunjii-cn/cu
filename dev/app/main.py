@@ -544,12 +544,8 @@ class GarbageCleanupTool:
         self._batch_size = self.settings.get("batch_size", 20)
         self._flush_interval = self.settings.get("flush_interval", 0.15)
 
-        self._settings_visible = False
-        self._settings_frame = None
-        self._delete_settings_visible = False
-        self._delete_settings_frame = None
-        self._preset_rules_visible = False
-        self._preset_rules_frame = None
+        self._current_panel = None
+        self._current_panel_type = None
 
         self.preset_vars = {}
         self._prev_column_widths = {}
@@ -703,10 +699,10 @@ class GarbageCleanupTool:
     def setup_scan_conditions(self):
         saved_enabled = self.settings.get("category_enabled", {})
 
-        func_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
-        func_frame.pack(fill="x", padx=10, pady=(5, 2))
+        self._func_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
+        self._func_frame.pack(fill="x", padx=10, pady=(5, 2))
 
-        func_row = ctk.CTkFrame(func_frame, fg_color="#1e1e1e")
+        func_row = ctk.CTkFrame(self._func_frame, fg_color="#1e1e1e")
         func_row.pack(fill="x", padx=8, pady=6)
 
         ctk.CTkLabel(func_row, text="功能设置", font=ctk.CTkFont(size=12, weight="bold"),
@@ -721,10 +717,6 @@ class GarbageCleanupTool:
         for text, cmd in func_buttons:
             ctk.CTkButton(func_row, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
                          text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=cmd).pack(side="left", padx=3)
-
-        self._panel_container = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
-        self._panel_container.pack(fill="x", padx=10)
-        self._panel_container.pack_forget()
 
         self.cat_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
         self.cat_frame.pack(fill="x", padx=10, pady=2)
@@ -1005,28 +997,30 @@ class GarbageCleanupTool:
                 self.tree.item(item, values=("☐", *values[1:]))
         self._update_selected_size_display()
 
+    def _destroy_current_panel(self):
+        if self._current_panel is not None:
+            self._current_panel.destroy()
+            self._current_panel = None
+            self._current_panel_type = None
+
     def toggle_settings_panel(self):
-        self._close_other_panels("settings")
-        if self._settings_visible:
-            if self._settings_frame:
-                self._settings_frame.destroy()
-                self._settings_frame = None
-            self._settings_visible = False
-            self._hide_panel_container()
+        if self._current_panel_type == "settings":
+            self._destroy_current_panel()
             return
-        self._show_panel_container()
-        self._settings_visible = True
+        self._destroy_current_panel()
+        panel = ctk.CTkFrame(self.main_frame, fg_color="#252525", border_color="#444", border_width=1)
+        panel.pack(fill="x", padx=10, pady=(2, 2), after=self._func_frame)
+        self._current_panel = panel
+        self._current_panel_type = "settings"
         sys_info = self.settings.get("sys_info", get_system_info())
         rec = self.settings.get("recommended", recommend_params(sys_info))
-        self._settings_frame = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
-        self._settings_frame.pack(fill="x", pady=(0, 4))
-        hw_row = ctk.CTkFrame(self._settings_frame, fg_color="#252525")
+        hw_row = ctk.CTkFrame(panel, fg_color="#252525")
         hw_row.pack(fill="x", padx=10, pady=(8, 4))
         ctk.CTkLabel(hw_row, text=f"💻 {sys_info['total_ram_gb']}GB | {sys_info['cpu_physical']}核{sys_info['cpu_logical']}线程",
                     font=ctk.CTkFont(size=12), text_color=COLOR_DIM).pack(side="left")
-        params_row = ctk.CTkFrame(self._settings_frame, fg_color="#252525")
+        params_row = ctk.CTkFrame(panel, fg_color="#252525")
         params_row.pack(fill="x", padx=10, pady=4)
-        self._settings_entries = {}
+        entries = {}
         items = [
             ("max_display", "显示上限", str(self._max_display), str(rec["max_display"])),
             ("max_depth", "递归深度", str(self._max_depth), str(rec["max_depth"])),
@@ -1039,25 +1033,25 @@ class GarbageCleanupTool:
                                text_color=COLOR_TEXT, font=ctk.CTkFont(size=12))
             entry.pack(side="left", padx=(0, 2))
             entry.insert(0, current)
-            self._settings_entries[key] = entry
-        btn_row = ctk.CTkFrame(self._settings_frame, fg_color="#252525")
+            entries[key] = entry
+        btn_row = ctk.CTkFrame(panel, fg_color="#252525")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
 
         def apply_rec():
             for key, _, _, default in items:
-                self._settings_entries[key].delete(0, "end")
-                self._settings_entries[key].insert(0, default)
+                entries[key].delete(0, "end")
+                entries[key].insert(0, default)
 
         def save_inline():
             try:
-                self._max_display = int(self._settings_entries["max_display"].get())
-                self._max_depth = int(self._settings_entries["max_depth"].get())
-                self._batch_size = int(self._settings_entries["batch_size"].get())
-                self._flush_interval = float(self._settings_entries["flush_interval"].get())
+                self._max_display = int(entries["max_display"].get())
+                self._max_depth = int(entries["max_depth"].get())
+                self._batch_size = int(entries["batch_size"].get())
+                self._flush_interval = float(entries["flush_interval"].get())
                 self.settings.update({"max_display": self._max_display, "max_depth": self._max_depth,
                                      "batch_size": self._batch_size, "flush_interval": self._flush_interval})
                 save_settings(self.settings)
-                self.toggle_settings_panel()
+                self._destroy_current_panel()
             except ValueError:
                 messagebox.showerror("输入错误", "请输入有效的数值")
 
@@ -1067,102 +1061,85 @@ class GarbageCleanupTool:
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_inline).pack(side="left", padx=5)
 
     def toggle_delete_settings_panel(self):
-        self._close_other_panels("delete")
-        if self._delete_settings_visible:
-            if self._delete_settings_frame:
-                self._delete_settings_frame.destroy()
-                self._delete_settings_frame = None
-            self._delete_settings_visible = False
-            self._hide_panel_container()
+        if self._current_panel_type == "delete":
+            self._destroy_current_panel()
             return
-        self._show_panel_container()
-        self._delete_settings_visible = True
-        self._delete_settings_frame = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
-        self._delete_settings_frame.pack(fill="x", pady=(0, 4))
-        mode_row = ctk.CTkFrame(self._delete_settings_frame, fg_color="#252525")
+        self._destroy_current_panel()
+        panel = ctk.CTkFrame(self.main_frame, fg_color="#252525", border_color="#444", border_width=1)
+        panel.pack(fill="x", padx=10, pady=(2, 2), after=self._func_frame)
+        self._current_panel = panel
+        self._current_panel_type = "delete"
+        mode_row = ctk.CTkFrame(panel, fg_color="#252525")
         mode_row.pack(fill="x", padx=10, pady=(8, 4))
         ctk.CTkLabel(mode_row, text="删除方式", font=ctk.CTkFont(size=12, weight="bold"), text_color=COLOR_TEXT).pack(side="left", padx=(0, 10))
-        self._delete_mode_var = ctk.StringVar(value=self.delete_mode)
+        del_mode_var = ctk.StringVar(value=self.delete_mode)
         for val, label in [("permanent", "彻底删除"), ("recycle", "删除到回收站"), ("move", "移动到文件夹"), ("compress", "压缩为压缩包")]:
-            ctk.CTkRadioButton(mode_row, text=label, variable=self._delete_mode_var, value=val,
+            ctk.CTkRadioButton(mode_row, text=label, variable=del_mode_var, value=val,
                               fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, text_color=COLOR_TEXT,
                               font=ctk.CTkFont(size=12)).pack(side="left", padx=5)
-        detail_row = ctk.CTkFrame(self._delete_settings_frame, fg_color="#252525")
+        detail_row = ctk.CTkFrame(panel, fg_color="#252525")
         detail_row.pack(fill="x", padx=10, pady=4)
         ctk.CTkLabel(detail_row, text="移动目录", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
-        self._move_dir_entry = ctk.CTkEntry(detail_row, placeholder_text="选择移动目标文件夹...",
-                                           fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
-                                           placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12), width=300)
-        self._move_dir_entry.pack(side="left", padx=(0, 4))
-        self._move_dir_entry.insert(0, self.delete_move_dir)
-        ctk.CTkButton(detail_row, text="浏览", width=50, height=26, command=self._browse_move_dir,
+        move_dir_entry = ctk.CTkEntry(detail_row, placeholder_text="选择移动目标文件夹...",
+                                     fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
+                                     placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12), width=300)
+        move_dir_entry.pack(side="left", padx=(0, 4))
+        move_dir_entry.insert(0, self.delete_move_dir)
+
+        def browse_move():
+            d = filedialog.askdirectory(title="选择移动目标文件夹")
+            if d:
+                move_dir_entry.delete(0, "end")
+                move_dir_entry.insert(0, d)
+
+        ctk.CTkButton(detail_row, text="浏览", width=50, height=26, command=browse_move,
                      fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 12))
         ctk.CTkLabel(detail_row, text="压缩包名", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
-        self._zip_name_entry = ctk.CTkEntry(detail_row, placeholder_text="如 cleanup_{date}",
-                                           fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
-                                           placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12), width=180)
-        self._zip_name_entry.pack(side="left", padx=(0, 4))
-        self._zip_name_entry.insert(0, self.delete_zip_name)
+        zip_name_entry = ctk.CTkEntry(detail_row, placeholder_text="如 cleanup_{date}",
+                                     fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
+                                     placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12), width=180)
+        zip_name_entry.pack(side="left", padx=(0, 4))
+        zip_name_entry.insert(0, self.delete_zip_name)
         ctk.CTkLabel(detail_row, text="{date}=日期 {time}=时间", font=ctk.CTkFont(size=10), text_color=COLOR_DIM).pack(side="left")
-        btn_row = ctk.CTkFrame(self._delete_settings_frame, fg_color="#252525")
+        btn_row = ctk.CTkFrame(panel, fg_color="#252525")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
 
         def save_del():
-            self.delete_mode = self._delete_mode_var.get()
-            self.delete_move_dir = self._move_dir_entry.get().strip()
-            self.delete_zip_name = self._zip_name_entry.get().strip() or "cleanup_{date}"
+            self.delete_mode = del_mode_var.get()
+            self.delete_move_dir = move_dir_entry.get().strip()
+            self.delete_zip_name = zip_name_entry.get().strip() or "cleanup_{date}"
             self.settings.update({"delete_mode": self.delete_mode, "delete_move_dir": self.delete_move_dir,
                                  "delete_zip_name": self.delete_zip_name})
             save_settings(self.settings)
-            self.toggle_delete_settings_panel()
+            self._destroy_current_panel()
 
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_del).pack(side="left", padx=5)
 
-    def _show_panel_container(self):
-        self._panel_container.pack(fill="x", padx=10, before=self.cat_frame)
-
-    def _hide_panel_container(self):
-        self._panel_container.pack_forget()
-
-    def _close_other_panels(self, keep):
-        if keep != "settings" and self._settings_visible:
-            self.toggle_settings_panel()
-        if keep != "delete" and self._delete_settings_visible:
-            self.toggle_delete_settings_panel()
-        if keep != "preset" and self._preset_rules_visible:
-            self.toggle_preset_rules_panel()
-        if keep != "analysis" and self._analysis_visible:
-            self.toggle_analysis_report()
-
     def toggle_preset_rules_panel(self):
-        self._close_other_panels("preset")
-        if self._preset_rules_visible:
-            if self._preset_rules_frame:
-                self._preset_rules_frame.destroy()
-                self._preset_rules_frame = None
-            self._preset_rules_visible = False
-            self._hide_panel_container()
+        if self._current_panel_type == "preset":
+            self._destroy_current_panel()
             return
-        self._show_panel_container()
-        self._preset_rules_visible = True
-        self._preset_rules_frame = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
-        self._preset_rules_frame.pack(fill="x", pady=(0, 4))
+        self._destroy_current_panel()
+        panel = ctk.CTkFrame(self.main_frame, fg_color="#252525", border_color="#444", border_width=1)
+        panel.pack(fill="x", padx=10, pady=(2, 2), after=self._func_frame)
+        self._current_panel = panel
+        self._current_panel_type = "preset"
 
-        ctk.CTkLabel(self._preset_rules_frame, text="预设规则包", font=ctk.CTkFont(size=12, weight="bold"),
+        ctk.CTkLabel(panel, text="预设规则包", font=ctk.CTkFont(size=12, weight="bold"),
                     text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(8, 4))
 
-        rules_container = ctk.CTkFrame(self._preset_rules_frame, fg_color="#252525")
+        rules_container = ctk.CTkFrame(panel, fg_color="#252525")
         rules_container.pack(fill="x", padx=10, pady=4)
 
-        self._rule_check_vars = {}
+        rule_check_vars = {}
         for rule_id, rule_info in PRESET_RULE_PACKS.items():
             row = ctk.CTkFrame(rules_container, fg_color="#252525")
             row.pack(fill="x", pady=2)
 
             is_active = rule_id in self._active_rule_packs
             var = ctk.BooleanVar(value=is_active)
-            self._rule_check_vars[rule_id] = var
+            rule_check_vars[rule_id] = var
 
             ctk.CTkCheckBox(row, text=rule_info["name"], variable=var, fg_color=COLOR_RED,
                           hover_color=COLOR_RED_LIGHT, checkmark_color=COLOR_TEXT,
@@ -1172,22 +1149,22 @@ class GarbageCleanupTool:
             ctk.CTkLabel(row, text=rule_info["desc"], font=ctk.CTkFont(size=10),
                         text_color=COLOR_DIM).pack(side="left")
 
-        btn_row = ctk.CTkFrame(self._preset_rules_frame, fg_color="#252525")
+        btn_row = ctk.CTkFrame(panel, fg_color="#252525")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
 
         def save_rules():
-            self._active_rule_packs = {rid for rid, v in self._rule_check_vars.items() if v.get()}
+            self._active_rule_packs = {rid for rid, v in rule_check_vars.items() if v.get()}
             self.settings["active_rule_packs"] = list(self._active_rule_packs)
             self._apply_rule_packs()
             save_settings(self.settings)
-            self.toggle_preset_rules_panel()
+            self._destroy_current_panel()
 
         ctk.CTkButton(btn_row, text="全选", height=26, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12),
-                     command=lambda: [v.set(True) for v in self._rule_check_vars.values()]).pack(side="left", padx=(0, 5))
+                     command=lambda: [v.set(True) for v in rule_check_vars.values()]).pack(side="left", padx=(0, 5))
         ctk.CTkButton(btn_row, text="全不选", height=26, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12),
-                     command=lambda: [v.set(False) for v in self._rule_check_vars.values()]).pack(side="left", padx=(0, 5))
+                     command=lambda: [v.set(False) for v in rule_check_vars.values()]).pack(side="left", padx=(0, 5))
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_rules).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="📁 导入规则", height=26, fg_color="#333", hover_color=COLOR_RED,
@@ -1196,10 +1173,7 @@ class GarbageCleanupTool:
                      text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=self._export_custom_rule_pack).pack(side="left", padx=5)
 
     def _on_rule_pack_toggle(self, rule_id):
-        if self._rule_check_vars[rule_id].get():
-            self._active_rule_packs.add(rule_id)
-        else:
-            self._active_rule_packs.discard(rule_id)
+        pass
 
     def _apply_rule_packs(self):
         active_categories = set()
@@ -1229,7 +1203,7 @@ class GarbageCleanupTool:
             custom_packs[rule_id] = data
             self.settings["custom_rule_packs"] = custom_packs
             save_settings(self.settings)
-            self.toggle_preset_rules_panel()
+            self._destroy_current_panel()
             messagebox.showinfo("导入成功", f"规则包 '{data['name']}' 已导入")
         except Exception as e:
             messagebox.showerror("导入失败", f"读取文件出错: {e}")
@@ -1257,11 +1231,43 @@ class GarbageCleanupTool:
         except Exception as e:
             messagebox.showerror("导出失败", f"写入文件出错: {e}")
 
-    def _browse_move_dir(self):
-        d = filedialog.askdirectory(title="选择移动目标文件夹")
-        if d:
-            self._move_dir_entry.delete(0, "end")
-            self._move_dir_entry.insert(0, d)
+    def toggle_analysis_report(self):
+        if self._current_panel_type == "analysis":
+            self._destroy_current_panel()
+            return
+        self._destroy_current_panel()
+        panel = ctk.CTkFrame(self.main_frame, fg_color="#252525", border_color="#444", border_width=1)
+        panel.pack(fill="x", padx=10, pady=(2, 2), after=self._func_frame)
+        self._current_panel = panel
+        self._current_panel_type = "analysis"
+
+        top_row = ctk.CTkFrame(panel, fg_color="#252525")
+        top_row.pack(fill="x", padx=10, pady=(8, 4))
+        ctk.CTkLabel(top_row, text="📊 分析报告", font=ctk.CTkFont(size=12, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left", padx=5)
+        ctk.CTkButton(top_row, text="✅ 校验结果", height=22, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=11),
+                     command=self._verify_and_update_report).pack(side="left", padx=5)
+        ctk.CTkButton(top_row, text="✕", width=24, height=24, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_DIM, font=ctk.CTkFont(size=11),
+                     command=self._destroy_current_panel).pack(side="right", padx=5)
+
+        content_row = ctk.CTkFrame(panel, fg_color="#252525")
+        content_row.pack(fill="x", padx=10, pady=(0, 8))
+
+        self._report_chart = tk.Canvas(content_row, bg="#252525", highlightthickness=0, width=200, height=200)
+        self._report_chart.pack(side="left", padx=(0, 10))
+
+        report_text = ctk.CTkTextbox(content_row, fg_color="#2a2a2a", width=500,
+                                    border_color="#444", border_width=1, text_color=COLOR_TEXT,
+                                    font=ctk.CTkFont(size=11), height=200)
+        report_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
+
+        self._draw_report_pie(self._report_chart)
+        content = self._build_report_content()
+        report_text.insert("end", content)
+        report_text.configure(state="disabled")
+        self._report_text_widget = report_text
 
     def setup_table_area(self):
         table_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
@@ -1305,47 +1311,6 @@ class GarbageCleanupTool:
         self.tree.bind("<ButtonPress-1>", self._on_col_press)
         self.tree.bind("<ButtonRelease-1>", self._on_col_release)
         self.tree.bind("<Motion>", self._on_col_motion)
-
-    def toggle_analysis_report(self):
-        if self._analysis_visible:
-            if self._analysis_overlay:
-                self._analysis_overlay.destroy()
-                self._analysis_overlay = None
-            self._analysis_visible = False
-            self._hide_panel_container()
-            return
-        self._show_panel_container()
-        self._analysis_visible = True
-        self._analysis_overlay = ctk.CTkFrame(self._panel_container, fg_color="#252525", border_color="#444", border_width=1)
-        self._analysis_overlay.pack(fill="x", pady=(0, 4))
-
-        top_row = ctk.CTkFrame(self._analysis_overlay, fg_color="#252525")
-        top_row.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(top_row, text="📊 分析报告", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=COLOR_TEXT).pack(side="left", padx=5)
-        ctk.CTkButton(top_row, text="✅ 校验结果", height=22, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=11),
-                     command=self._verify_and_update_report).pack(side="left", padx=5)
-        ctk.CTkButton(top_row, text="✕", width=24, height=24, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_DIM, font=ctk.CTkFont(size=11),
-                     command=self.toggle_analysis_report).pack(side="right", padx=5)
-
-        content_row = ctk.CTkFrame(self._analysis_overlay, fg_color="#252525")
-        content_row.pack(fill="x", padx=10, pady=(0, 8))
-
-        self._report_chart = tk.Canvas(content_row, bg="#252525", highlightthickness=0, width=200, height=200)
-        self._report_chart.pack(side="left", padx=(0, 10))
-
-        report_text = ctk.CTkTextbox(content_row, fg_color="#2a2a2a", width=500,
-                                    border_color="#444", border_width=1, text_color=COLOR_TEXT,
-                                    font=ctk.CTkFont(size=11), height=200)
-        report_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
-
-        self._draw_report_pie(self._report_chart)
-        content = self._build_report_content()
-        report_text.insert("end", content)
-        report_text.configure(state="disabled")
-        self._report_text_widget = report_text
 
     def _draw_report_pie(self, canvas):
         cat_sizes = {}
