@@ -546,6 +546,7 @@ class GarbageCleanupTool:
 
         self._current_panel = None
         self._current_panel_type = None
+        self._dup_groups = []
 
         self.preset_vars = {}
         self._prev_column_widths = {}
@@ -763,8 +764,8 @@ class GarbageCleanupTool:
                 ToolTip(cb, tooltip_text)
                 ToolTip(tag_frame, tooltip_text)
 
-            color_btn = ctk.CTkButton(tag_frame, text="🎨", width=24, height=24, fg_color="#444", hover_color=COLOR_RED,
-                                     text_color=COLOR_DIM, font=ctk.CTkFont(size=11),
+            color_btn = ctk.CTkButton(tag_frame, text="调色", width=36, height=22, fg_color="#444", hover_color=COLOR_RED,
+                                     text_color=COLOR_DIM, font=ctk.CTkFont(size=10),
                                      command=lambda cid=cat_id: self._pick_color_inline(cid))
             color_btn.pack(side="left", padx=(0, 4))
             self._cat_color_btns[cat_id] = color_btn
@@ -798,7 +799,7 @@ class GarbageCleanupTool:
                     if tooltip_text:
                         ToolTip(child_cb, tooltip_text)
 
-                    child_color_btn = ctk.CTkButton(child_frame, text="🎨", width=20, height=20, fg_color="#333",
+                    child_color_btn = ctk.CTkButton(child_frame, text="调色", width=36, height=20, fg_color="#333",
                                                   hover_color=COLOR_RED, text_color=COLOR_DIM, font=ctk.CTkFont(size=9),
                                                   command=lambda cid=child_id: self._pick_color_inline(cid))
                     child_color_btn.pack(side="left", padx=3)
@@ -1241,33 +1242,109 @@ class GarbageCleanupTool:
         self._current_panel = panel
         self._current_panel_type = "analysis"
 
-        top_row = ctk.CTkFrame(panel, fg_color="#252525")
-        top_row.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(top_row, text="📊 分析报告", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=COLOR_TEXT).pack(side="left", padx=5)
-        ctk.CTkButton(top_row, text="✅ 校验结果", height=22, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=11),
-                     command=self._verify_and_update_report).pack(side="left", padx=5)
-        ctk.CTkButton(top_row, text="✕", width=24, height=24, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_DIM, font=ctk.CTkFont(size=11),
-                     command=self._destroy_current_panel).pack(side="right", padx=5)
+        header = ctk.CTkFrame(panel, fg_color="#252525")
+        header.pack(fill="x", padx=12, pady=(8, 2))
+        ctk.CTkLabel(header, text="📊 分析报告", font=ctk.CTkFont(size=14, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left")
+        ctk.CTkButton(header, text="✕", width=26, height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_DIM, font=ctk.CTkFont(size=12),
+                     command=self._destroy_current_panel).pack(side="right")
 
         content_row = ctk.CTkFrame(panel, fg_color="#252525")
-        content_row.pack(fill="x", padx=10, pady=(0, 8))
+        content_row.pack(fill="x", padx=12, pady=(4, 8))
+        content_row.grid_columnconfigure(0, weight=0)
+        content_row.grid_columnconfigure(1, weight=1)
 
-        self._report_chart = tk.Canvas(content_row, bg="#252525", highlightthickness=0, width=200, height=200)
-        self._report_chart.pack(side="left", padx=(0, 10))
+        self._report_chart = tk.Canvas(content_row, bg="#252525", highlightthickness=0, width=260, height=260)
+        self._report_chart.grid(row=0, column=0, rowspan=2, padx=(0, 12), pady=0, sticky="n")
 
-        report_text = ctk.CTkTextbox(content_row, fg_color="#2a2a2a", width=500,
-                                    border_color="#444", border_width=1, text_color=COLOR_TEXT,
-                                    font=ctk.CTkFont(size=11), height=200)
-        report_text.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        stats_frame = ctk.CTkFrame(content_row, fg_color="#2a2a2a", corner_radius=8, border_width=1, border_color="#444")
+        stats_frame.grid(row=0, column=1, sticky="new", pady=(0, 6))
 
-        self._draw_report_pie(self._report_chart)
-        content = self._build_report_content()
-        report_text.insert("end", content)
-        report_text.configure(state="disabled")
-        self._report_text_widget = report_text
+        self._report_stats_label = ctk.CTkLabel(stats_frame, text="", font=ctk.CTkFont(size=13),
+                                                 text_color=COLOR_TEXT, justify="left", anchor="w")
+        self._report_stats_label.pack(fill="x", padx=10, pady=6)
+
+        advice_frame = ctk.CTkFrame(content_row, fg_color="#2a2a2a", corner_radius=8, border_width=1, border_color="#444")
+        advice_frame.grid(row=1, column=1, sticky="new")
+
+        self._report_advice_label = ctk.CTkLabel(advice_frame, text="", font=ctk.CTkFont(size=13),
+                                                  text_color=COLOR_TEXT, justify="left", anchor="w", wraplength=800)
+        self._report_advice_label.pack(fill="x", padx=10, pady=6)
+
+        self._do_verify_and_build_report()
+
+    def _do_verify_and_build_report(self):
+        removed = changed = 0
+        valid = []
+        for fi in self.file_list:
+            fp = fi["path"]
+            if not os.path.exists(fp):
+                removed += 1
+                self.selected_files.discard(fp)
+                continue
+            try:
+                st = os.stat(fp)
+                if st.st_size != fi["size"] or st.st_mtime != fi["mtime"]:
+                    fi["size"] = st.st_size
+                    fi["mtime"] = st.st_mtime
+                    changed += 1
+            except Exception:
+                removed += 1
+                self.selected_files.discard(fp)
+                continue
+            valid.append(fi)
+        if removed > 0 or changed > 0:
+            self.file_list = valid
+            self.filtered_files = valid[:]
+            self.total_size = sum(fi["size"] for fi in valid)
+            self.display_files()
+            self._auto_save_results()
+            self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
+
+        cat_sizes = {}
+        cat_counts = {}
+        for fi in self.filtered_files:
+            cat = fi.get("category", "其他")
+            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        total_size = sum(cat_sizes.values())
+        total_count = sum(cat_counts.values())
+
+        stats_text = f"📋 扫描统计\n   总文件数: {total_count}    总大小: {self._format_bytes(total_size)}"
+        if removed > 0 or changed > 0:
+            stats_text += f"\n   ✅ 校验: 有效 {len(valid)} | 已删除 {removed} | 已变更 {changed}"
+        if hasattr(self, '_report_stats_label') and self._report_stats_label:
+            self._report_stats_label.configure(text=stats_text)
+
+        advice_lines = []
+        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
+        if sorted_cats:
+            advice_lines.append("💡 建议处理方案")
+            idx = 1
+            top_cat, top_size = sorted_cats[0]
+            advice_lines.append(f"   {idx}. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
+            if top_size > 1024 * 1024 * 1024:
+                advice_lines.append("      → 建议优先清理，可释放 >1GB")
+            elif top_size > 100 * 1024 * 1024:
+                advice_lines.append("      → 建议清理，可释放 >100MB")
+            idx += 1
+            if cat_counts.get("duplicates", 0) > 0:
+                advice_lines.append(f"   {idx}. 发现 {cat_counts['duplicates']} 个重复文件 → 使用'重复检测'去重")
+                idx += 1
+            if cat_counts.get("empty_folders", 0) > 10:
+                advice_lines.append(f"   {idx}. 发现 {cat_counts['empty_folders']} 个空文件夹 → 可安全批量删除")
+                idx += 1
+            if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
+                advice_lines.append(f"   {idx}. 缓存文件较多 → 建议定期清理缓存")
+                idx += 1
+        advice_lines.append("\n⚠️ 清理前建议备份重要文件 | 系统文件谨慎处理 | 建议使用'删除到回收站'")
+
+        if hasattr(self, '_report_advice_label') and self._report_advice_label:
+            self._report_advice_label.configure(text="\n".join(advice_lines))
+
+        if hasattr(self, '_report_chart') and self._report_chart:
+            self._draw_report_pie(self._report_chart)
 
     def setup_table_area(self):
         table_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
@@ -1313,129 +1390,65 @@ class GarbageCleanupTool:
         self.tree.bind("<Motion>", self._on_col_motion)
 
     def _draw_report_pie(self, canvas):
+        name_to_id = {}
+        for cid, cinfo in CATEGORY_TREE.items():
+            name_to_id[cinfo["name"]] = cid
+        name_to_id["自定义规则"] = "custom"
+        name_to_id["空文件夹"] = "empty_folders"
+        name_to_id["重复文件"] = "duplicates"
+        name_to_id["✅保留"] = "duplicates"
+
         cat_sizes = {}
         for fi in self.filtered_files:
             cat = fi.get("category", "其他")
             cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
         sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
         if not sorted_cats:
-            canvas.create_text(100, 100, text="暂无数据", fill=COLOR_DIM, font=("Arial", 12))
+            canvas.create_text(130, 130, text="暂无数据", fill=COLOR_DIM, font=("Arial", 14))
             return
-        top_cats = sorted_cats[:6]
-        other_size = sum(s for _, s in sorted_cats[6:])
+        top_cats = sorted_cats[:8]
+        other_size = sum(s for _, s in sorted_cats[8:])
         if other_size > 0:
             top_cats.append(("其他", other_size))
         total = sum(s for _, s in top_cats)
-        colors_list = ["#cc4444", "#cc8844", "#cccc44", "#44cc88", "#4488cc", "#8844cc", "#888888"]
+
+        def get_cat_color(cat_name):
+            cid = name_to_id.get(cat_name, "")
+            if cid:
+                return self.category_colors.get(cid, "#333333")
+            return "#333333"
+
+        def get_cat_text_color(cat_name):
+            cid = name_to_id.get(cat_name, "")
+            if cid:
+                return CATEGORY_TEXT_COLORS.get(cid, COLOR_TEXT)
+            return COLOR_TEXT
+
         canvas.delete("all")
-        cx, cy, r = 100, 90, 70
+        cx, cy, r = 130, 110, 85
         start_angle = 90
         for i, (cat, size) in enumerate(top_cats):
             extent = (size / total) * 360 if total > 0 else 0
-            color = colors_list[i % len(colors_list)]
+            color = get_cat_color(cat)
             canvas.create_arc(cx - r, cy - r, cx + r, cy + r,
                             start=start_angle, extent=extent,
                             fill=color, outline="#252525", width=2, style="pieslice")
             mid_angle = start_angle + extent / 2
-            if extent > 15:
+            if extent > 12:
                 pct = (size / total) * 100
                 tx = cx + (r * 0.6) * math.cos(math.radians(mid_angle))
                 ty = cy - (r * 0.6) * math.sin(math.radians(mid_angle))
-                canvas.create_text(tx, ty, text=f"{pct:.0f}%", fill="white", font=("Arial", 8, "bold"))
+                canvas.create_text(tx, ty, text=f"{pct:.0f}%", fill="white", font=("Arial", 10, "bold"))
             start_angle += extent
-        canvas.create_text(cx, cy - r - 10, text="分类占比", fill=COLOR_TEXT, font=("Arial", 10, "bold"))
-        ly = cy + r + 12
+        canvas.create_text(cx, cy - r - 12, text="分类占比", fill=COLOR_TEXT, font=("Arial", 12, "bold"))
+        ly = cy + r + 14
         for i, (cat, size) in enumerate(top_cats):
-            color = colors_list[i % len(colors_list)]
-            canvas.create_rectangle(5, ly, 15, ly + 8, fill=color, outline="")
+            color = get_cat_color(cat)
+            text_color = get_cat_text_color(cat)
+            canvas.create_rectangle(8, ly, 20, ly + 10, fill=color, outline="")
             pct = (size / total) * 100 if total > 0 else 0
-            canvas.create_text(18, ly + 4, text=f"{cat} {self._format_bytes(size)}", fill=COLOR_TEXT, font=("Arial", 8), anchor="w")
-            ly += 13
-
-    def _build_report_content(self):
-        cat_sizes = {}
-        cat_counts = {}
-        for fi in self.filtered_files:
-            cat = fi.get("category", "其他")
-            cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
-            cat_counts[cat] = cat_counts.get(cat, 0) + 1
-        total_size = sum(cat_sizes.values())
-        total_count = sum(cat_counts.values())
-
-        lines = []
-        lines.append("📋 扫描统计")
-        lines.append(f"   总文件数: {total_count}")
-        lines.append(f"   总大小: {self._format_bytes(total_size)}")
-        lines.append("")
-
-        sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
-        if sorted_cats:
-            top_cat, top_size = sorted_cats[0]
-            lines.append("💡 建议处理方案:")
-            lines.append(f"   1. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
-            if top_size > 1024 * 1024 * 1024:
-                lines.append("      → 建议优先清理，可释放 >1GB")
-            elif top_size > 100 * 1024 * 1024:
-                lines.append("      → 建议清理，可释放 >100MB")
-
-        if cat_counts.get("duplicates", 0) > 0:
-            lines.append(f"   2. 发现 {cat_counts['duplicates']} 个重复文件")
-            lines.append("      → 使用'重复检测'功能去重")
-
-        if cat_counts.get("empty_folders", 0) > 10:
-            lines.append(f"   3. 发现 {cat_counts['empty_folders']} 个空文件夹")
-            lines.append("      → 可安全批量删除")
-
-        if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
-            lines.append("   4. 缓存文件较多")
-            lines.append("      → 建议定期清理缓存")
-
-        lines.append("")
-        lines.append("⚠️ 注意事项:")
-        lines.append("   - 清理前建议备份重要文件")
-        lines.append("   - 系统文件谨慎处理")
-        lines.append("   - 建议使用'删除到回收站'")
-
-        return "\n".join(lines)
-
-    def _verify_and_update_report(self):
-        if not self.file_list:
-            return
-        removed = changed = 0
-        valid = []
-        for fi in self.file_list:
-            fp = fi["path"]
-            if not os.path.exists(fp):
-                removed += 1
-                self.selected_files.discard(fp)
-                continue
-            try:
-                st = os.stat(fp)
-                if st.st_size != fi["size"] or st.st_mtime != fi["mtime"]:
-                    fi["size"] = st.st_size
-                    fi["mtime"] = st.st_mtime
-                    changed += 1
-            except Exception:
-                removed += 1
-                self.selected_files.discard(fp)
-                continue
-            valid.append(fi)
-        self.file_list = valid
-        self.filtered_files = valid[:]
-        self.total_size = sum(fi["size"] for fi in valid)
-        self.display_files()
-        self._auto_save_results()
-        self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
-
-        if hasattr(self, '_report_text_widget') and self._report_text_widget:
-            self._report_text_widget.configure(state="normal")
-            self._report_text_widget.delete("1.0", "end")
-            content = self._build_report_content()
-            content += f"\n\n✅ 校验结果:\n   有效: {len(valid)}\n   已删除: {removed}\n   已变更: {changed}"
-            self._report_text_widget.insert("end", content)
-            self._report_text_widget.configure(state="disabled")
-        if hasattr(self, '_report_chart') and self._report_chart:
-            self._draw_report_pie(self._report_chart)
+            canvas.create_text(24, ly + 5, text=f"{cat}  {self._format_bytes(size)}  ({pct:.1f}%)", fill=text_color, font=("Arial", 10), anchor="w")
+            ly += 16
 
     def _format_bytes(self, size_bytes):
         if size_bytes == 0: return "0 B"
@@ -1782,62 +1795,258 @@ class GarbageCleanupTool:
         threading.Thread(target=self.run_scan, args=(directory,), daemon=True).start()
 
     def start_duplicate_scan(self):
-        if not self.file_list:
-            messagebox.showwarning("提示", "请先执行扫描")
+        directory = self.dir_entry.get().strip()
+        if not directory or not os.path.isdir(directory):
+            messagebox.showwarning("输入错误", "请选择有效的扫描目录")
             return
         if self.scanning:
-            messagebox.showwarning("提示", "请等待扫描完成")
+            messagebox.showwarning("提示", "请等待当前操作完成")
             return
-        self.scan_cancelled = False
+        self.file_list.clear()
+        self.filtered_files.clear()
+        self.selected_files.clear()
+        self._pending_ui_updates.clear()
+        self.total_size = 0
+        self.processed_items = 0
+        self._displayed_count = 0
+        self._dup_groups = []
+        self.clear_table()
+        self.status_label.configure(text="🔍 重复检测：正在扫描文件...")
+        self.progress_bar.set(0)
+        self.count_label.configure(text="📊 文件: 0 | 总大小: 0 MB")
+        self.selected_size_label.configure(text="☑ 已选: 0 个 | 已选大小: 0 MB")
         self.stop_button.configure(state="normal")
-        threading.Thread(target=self._run_dup_scan, daemon=True).start()
+        self.scanning = True
+        self.scan_cancelled = False
+        self.settings["scan_directory"] = directory
+        save_settings(self.settings)
+        threading.Thread(target=self._run_dup_scan, args=(directory,), daemon=True).start()
 
-    def _run_dup_scan(self):
+    def _run_dup_scan(self, directory):
         try:
-            self._detect_duplicates()
-            if not self.scan_cancelled:
-                self._flush_ui_updates()
-                self.root.after(0, lambda: self.status_label.configure(text="✅ 重复文件检测完成"))
-        except Exception:
-            self.root.after(0, lambda: self.status_label.configure(text="❌ 重复检测出错"))
-        finally:
-            self._flush_ui_updates()
-            self.root.after(0, lambda: self.stop_button.configure(state="disabled"))
-            self.root.after(0, lambda: self.progress_bar.set(1.0))
+            all_files = []
+            self._scan_depth = 0
 
-    def _detect_duplicates(self):
-        self.root.after(0, lambda: self.status_label.configure(text="🔍 正在比对重复文件..."))
-        size_groups = {}
-        for f in self.file_list:
-            if f["size"] > 0 and f["category"] != "空文件夹":
+            def collect_files(d):
+                if self._scan_depth >= self._max_depth or self.scan_cancelled:
+                    return
+                self._scan_depth += 1
+                try:
+                    with os.scandir(d) as it:
+                        for entry in it:
+                            if self.scan_cancelled:
+                                return
+                            try:
+                                if entry.is_dir(follow_symlinks=False):
+                                    collect_files(entry.path)
+                                elif entry.is_file(follow_symlinks=False):
+                                    st = entry.stat(follow_symlinks=False)
+                                    if st.st_size > 0:
+                                        all_files.append({
+                                            "path": entry.path, "name": entry.name,
+                                            "size": st.st_size, "mtime": st.st_mtime,
+                                            "type": os.path.splitext(entry.name)[1].lower()
+                                        })
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                finally:
+                    self._scan_depth -= 1
+
+            collect_files(directory)
+            total = len(all_files)
+            if total == 0 or self.scan_cancelled:
+                self.root.after(0, lambda: self.status_label.configure(text="⚠️ 未找到文件"))
+                return
+
+            self.root.after(0, lambda: self.status_label.configure(text=f"🔍 重复检测：共{total}个文件，按大小分组..."))
+            size_groups = {}
+            for f in all_files:
                 size_groups.setdefault(f["size"], []).append(f)
-        existing = {f["path"] for f in self.file_list}
-        for sz, files in size_groups.items():
-            if len(files) < 2 or self.scan_cancelled:
-                continue
+            size_candidates = {sz: fs for sz, fs in size_groups.items() if len(fs) >= 2}
+            candidate_count = sum(len(fs) for fs in size_candidates.values())
+            self.root.after(0, lambda c=candidate_count: self.status_label.configure(text=f"🔍 重复检测：{c}个大小相同的候选文件，头部哈希比对..."))
+
             head_groups = {}
-            for fi in files:
-                if self.scan_cancelled: return
-                h = self._head_hash(fi["path"])
-                if h: head_groups.setdefault(h, []).append(fi)
-            for h, cands in head_groups.items():
-                if len(cands) < 2 or self.scan_cancelled: continue
+            processed = 0
+            for sz, files in size_candidates.items():
+                if self.scan_cancelled:
+                    return
+                for fi in files:
+                    if self.scan_cancelled:
+                        return
+                    h = self._head_hash(fi["path"])
+                    if h:
+                        head_groups.setdefault((sz, h), []).append(fi)
+                    processed += 1
+                    if processed % 50 == 0:
+                        pct = processed / candidate_count
+                        self.root.after(0, lambda p=pct: self.progress_bar.set(p))
+
+            head_candidates = {k: fs for k, fs in head_groups.items() if len(fs) >= 2}
+            head_candidate_count = sum(len(fs) for fs in head_candidates.values())
+            self.root.after(0, lambda c=head_candidate_count: self.status_label.configure(text=f"🔍 重复检测：{c}个头部匹配文件，全量哈希比对..."))
+
+            dup_groups = []
+            processed = 0
+            for key, files in head_candidates.items():
+                if self.scan_cancelled:
+                    return
                 full_groups = {}
-                for fi in cands:
-                    if self.scan_cancelled: return
+                for fi in files:
+                    if self.scan_cancelled:
+                        return
                     fh = self._full_hash(fi["path"])
-                    if fh: full_groups.setdefault(fh, []).append(fi)
+                    if fh:
+                        full_groups.setdefault(fh, []).append(fi)
+                    processed += 1
+                    if processed % 20 == 0:
+                        pct = processed / max(head_candidate_count, 1)
+                        self.root.after(0, lambda p=min(pct, 1.0): self.progress_bar.set(p))
+
                 for fh, group in full_groups.items():
-                    if len(group) < 2: continue
-                    group.sort(key=lambda x: x["mtime"])
-                    for fi in group[1:]:
-                        if fi["path"] not in existing:
-                            self._add_file_realtime({
-                                "path": fi["path"], "name": fi["name"], "size": fi["size"],
-                                "mtime": fi["mtime"], "type": fi["type"], "category": "重复文件",
-                                "desc": f"与 {group[0]['name']} 重复"
-                            })
-                            existing.add(fi["path"])
+                    if len(group) >= 2:
+                        group.sort(key=lambda x: x["mtime"])
+                        dup_groups.append(group[:])
+
+            self._dup_groups = dup_groups
+            if self.scan_cancelled:
+                return
+
+            dup_colors = ["#3a2020", "#203a20", "#20203a", "#3a3a20", "#3a203a", "#203a3a", "#2a2a3a", "#3a2a2a"]
+            group_total = 0
+            for gi, group in enumerate(dup_groups):
+                color_key = f"dup_{gi % len(dup_colors)}"
+                bg_color = dup_colors[gi % len(dup_colors)]
+                self.category_colors[color_key] = bg_color
+                tag_name = f"cat_{color_key}"
+                self.tree.tag_configure(tag_name, background=bg_color, foreground=COLOR_TEXT)
+                for fi in group:
+                    is_keep = fi is group[0]
+                    cat_label = "✅保留" if is_keep else "重复文件"
+                    desc = f"组{gi+1}: 与 {group[0]['name']} 重复" if not is_keep else f"组{gi+1}: 保留文件"
+                    info = {
+                        "path": fi["path"], "name": fi["name"], "size": fi["size"],
+                        "mtime": fi["mtime"], "type": fi["type"],
+                        "category": cat_label, "desc": desc, "dup_group": gi
+                    }
+                    self.file_list.append(info)
+                    self.filtered_files.append(info)
+                    self.total_size += fi["size"]
+                    if not is_keep:
+                        self.selected_files.add(fi["path"])
+                    tags = (tag_name, fi["path"])
+                    self.tree.insert("", "end",
+                                   values=("☑" if not is_keep else "☐", fi["name"], fi["path"],
+                                          self.format_size(fi["size"]),
+                                          datetime.fromtimestamp(fi["mtime"]).strftime("%Y-%m-%d %H:%M:%S"),
+                                          fi["type"], cat_label),
+                                   tags=tags)
+                    group_total += 1
+
+            waste_size = sum(fi["size"] for g in dup_groups for fi in g[1:])
+            waste_count = sum(len(g) - 1 for g in dup_groups)
+            self.progress_bar.set(1.0)
+            self.count_label.configure(text=f"📊 重复组: {len(dup_groups)} | 重复文件: {waste_count} | 可释放: {self._format_bytes(waste_size)}")
+            self._update_selected_size_display()
+            self._auto_save_results()
+            self.status_label.configure(text=f"✅ 重复检测完成 | {len(dup_groups)}组重复，可释放{self._format_bytes(waste_size)}")
+
+            if dup_groups:
+                self._show_dup_toolbar()
+
+        except Exception as e:
+            self.root.after(0, lambda: self.status_label.configure(text=f"❌ 重复检测出错: {e}"))
+        finally:
+            self.scanning = False
+            self.root.after(0, lambda: self.stop_button.configure(state="disabled"))
+
+    def _show_dup_toolbar(self):
+        if self._current_panel_type == "dup_toolbar":
+            return
+        self._destroy_current_panel()
+        panel = ctk.CTkFrame(self.main_frame, fg_color="#252525", border_color="#444", border_width=1)
+        panel.pack(fill="x", padx=10, pady=(2, 2), after=self._func_frame)
+        self._current_panel = panel
+        self._current_panel_type = "dup_toolbar"
+
+        header = ctk.CTkFrame(panel, fg_color="#252525")
+        header.pack(fill="x", padx=10, pady=(6, 2))
+        ctk.CTkLabel(header, text="🔄 重复文件处理", font=ctk.CTkFont(size=13, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left", padx=(0, 10))
+
+        btn_data = [
+            ("保留最新", self._dup_keep_newest),
+            ("保留最旧", self._dup_keep_oldest),
+            ("保留最短路径", self._dup_keep_shortest),
+            ("全选重复", self._dup_select_all),
+            ("取消全选", self._dup_deselect_all),
+        ]
+        for text, cmd in btn_data:
+            ctk.CTkButton(header, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
+                         text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=cmd).pack(side="left", padx=3)
+
+        ctk.CTkButton(header, text="✕", width=26, height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_DIM, font=ctk.CTkFont(size=12),
+                     command=self._destroy_current_panel).pack(side="right")
+
+    def _dup_keep_newest(self):
+        self._dup_apply_strategy("newest")
+
+    def _dup_keep_oldest(self):
+        self._dup_apply_strategy("oldest")
+
+    def _dup_keep_shortest(self):
+        self._dup_apply_strategy("shortest")
+
+    def _dup_apply_strategy(self, strategy):
+        self.selected_files.clear()
+        for gi, group in enumerate(self._dup_groups):
+            if strategy == "newest":
+                keep = max(group, key=lambda x: x["mtime"])
+            elif strategy == "oldest":
+                keep = min(group, key=lambda x: x["mtime"])
+            elif strategy == "shortest":
+                keep = min(group, key=lambda x: len(x["path"]))
+            else:
+                keep = group[0]
+            for fi in group:
+                if fi is not keep:
+                    self.selected_files.add(fi["path"])
+        self._refresh_dup_display()
+
+    def _dup_select_all(self):
+        self.selected_files.clear()
+        for group in self._dup_groups:
+            for fi in group[1:]:
+                self.selected_files.add(fi["path"])
+        self._refresh_dup_display()
+
+    def _dup_deselect_all(self):
+        self.selected_files.clear()
+        self._refresh_dup_display()
+
+    def _refresh_dup_display(self):
+        for item in self.tree.get_children():
+            tags = self.tree.item(item, "tags")
+            fp = tags[1] if len(tags) > 1 else tags[0]
+            vals = list(self.tree.item(item, "values"))
+            is_sel = fp in self.selected_files
+            vals[0] = "☑" if is_sel else "☐"
+            cat_idx = 6
+            if is_sel:
+                vals[cat_idx] = "重复文件"
+            else:
+                for gi, group in enumerate(self._dup_groups):
+                    if any(fi["path"] == fp for fi in group):
+                        if any(fi["path"] == fp and fi is group[0] for fi in group):
+                            vals[cat_idx] = "✅保留"
+                        else:
+                            vals[cat_idx] = "重复文件"
+                        break
+            self.tree.item(item, values=vals)
+        self._update_selected_size_display()
 
     def _head_hash(self, fp, hs=4096):
         try:
