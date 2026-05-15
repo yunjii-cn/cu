@@ -6,6 +6,9 @@ BAK/
 *.exe
 !ver/*.exe
 
+# PyInstaller运行时目录（onedir模式的_internal/）
+_internal/
+
 # Python缓存
 __pycache__/
 *.pyc

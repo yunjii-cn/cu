@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
+import sys
+
+if getattr(sys, 'frozen', False):
+    base = sys._MEIPASS
+    tcl_dir = os.path.join(base, 'tcl', 'tcl8.6')
+    tk_dir = os.path.join(base, 'tk', 'tk8.6')
+    if os.path.isdir(tcl_dir):
+        os.environ['TCL_LIBRARY'] = tcl_dir
+    if os.path.isdir(tk_dir):
+        os.environ['TK_LIBRARY'] = tk_dir
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, colorchooser
 from PIL import Image, ImageTk
-import os
-import sys
 import json
 import hashlib
 import threading
@@ -39,6 +49,9 @@ COLOR_BG = "#1a1a1a"
 COLOR_BORDER = "#333333"
 COLOR_TEXT = "#ffffff"
 COLOR_DIM = "#888888"
+
+FONT_FAMILY = "Microsoft YaHei UI"
+FONT_FAMILY_MONO = "Consolas"
 
 CATEGORY_COLORS_DEFAULT = {
     "temp": "#4a2020",
@@ -297,13 +310,13 @@ CATEGORY_TO_CHECKBOX["重复文件"] = "duplicates"
 CATEGORY_TO_CHECKBOX["自定义规则"] = "custom"
 
 COLUMN_WIDTHS_DEFAULT = {
-    "选择": 60, "文件名": 180, "完整路径": 350,
-    "大小": 100, "修改时间": 150, "类型": 100, "分类": 100,
+    "选择": 20, "文件名": 120, "完整路径": 500,
+    "大小": 70, "修改时间": 130, "类型": 60, "分类": 80,
 }
 
 COLUMN_MIN_WIDTHS = {
-    "选择": 55, "文件名": 80, "完整路径": 100,
-    "大小": 65, "修改时间": 110, "类型": 55, "分类": 65,
+    "选择": 20, "文件名": 60, "完整路径": 150,
+    "大小": 55, "修改时间": 110, "类型": 40, "分类": 50,
 }
 
 PRESET_RULE_PACKS = {
@@ -396,7 +409,7 @@ class ToolTip:
         label = tk.Label(tw, text=self.text, justify="left",
                         background="#333333", foreground="#ffffff",
                         relief="solid", borderwidth=1,
-                        font=("Arial", 11), padx=6, pady=4)
+                        font=("Microsoft YaHei UI", 11), padx=6, pady=4)
         label.pack()
 
     def hide(self, event=None):
@@ -506,6 +519,7 @@ class GarbageCleanupTool:
         self.root = ctk.CTk()
         self.root.title(APP_NAME)
         self.root.geometry("1400x800")
+        self.root.minsize(900, 600)
         self.root.resizable(True, True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
@@ -515,6 +529,7 @@ class GarbageCleanupTool:
 
         self.scanning = False
         self.scan_cancelled = False
+        self.scan_paused = False
         self.processed_items = 0
 
         self.scan_conditions = {}
@@ -525,6 +540,7 @@ class GarbageCleanupTool:
         self.sort_column = None
         self.sort_reverse = False
         self.selected_files = set()
+        self.selected_size = 0
         self.select_all_var = ctk.BooleanVar(value=True)
 
         self.settings = load_settings()
@@ -541,8 +557,11 @@ class GarbageCleanupTool:
         self._scan_depth = 0
         self._max_display = self.settings.get("max_display", 5000)
         self._max_depth = self.settings.get("max_depth", 50)
-        self._batch_size = self.settings.get("batch_size", 20)
-        self._flush_interval = self.settings.get("flush_interval", 0.15)
+        self._batch_size = self.settings.get("batch_size", 50)
+        self._flush_interval = self.settings.get("flush_interval", 0.3)
+        self._file_size_map = {}
+        self._last_auto_save_time = 0.0
+        self._auto_save_interval = 5.0
 
         self._current_panel = None
         self._current_panel_type = None
@@ -554,9 +573,10 @@ class GarbageCleanupTool:
         self._cat_child_rows = {}
         self._cat_color_btns = {}
         self._cat_tag_frames = {}
+        self._cat_tag_labels = {}
         self._child_checkboxes = {}
         self._cat_toggle_btns = {}
-        self._all_expanded = False
+        self._cat_expanded = False
         self._active_rule_packs = set(self.settings.get("active_rule_packs", ["windows_basic"]))
         self._chart_images = {}
         self._chart_labels = {}
@@ -620,11 +640,13 @@ class GarbageCleanupTool:
         style.configure("Dark.Treeview",
                        background=COLOR_BG, foreground=COLOR_TEXT,
                        fieldbackground=COLOR_BG, borderwidth=0,
-                       font=('Arial', 16), rowheight=28, relief="flat")
+                       font=('Microsoft YaHei UI', 12), rowheight=32, relief="flat",
+                       bordercolor=COLOR_BG, lightcolor=COLOR_BG, darkcolor=COLOR_BG)
         style.configure("Dark.Treeview.Heading",
                        background="#252525", foreground=COLOR_TEXT,
-                       borderwidth=0,
-                       font=('Arial', 16, 'bold'), relief="flat")
+                       borderwidth=0, relief="flat",
+                       font=('Microsoft YaHei UI', 12, 'bold'),
+                       bordercolor="#252525", lightcolor="#252525", darkcolor="#252525")
         style.map("Dark.Treeview",
                  background=[('selected', COLOR_RED), ('active', '#2a2a2a')],
                  foreground=[('selected', COLOR_TEXT)])
@@ -637,20 +659,13 @@ class GarbageCleanupTool:
                      background=[('selected', COLOR_RED), ('active', color)],
                      foreground=[('selected', COLOR_TEXT)])
 
-        style.configure("Dark.Vertical.TScrollbar", background=COLOR_RED, troughcolor=COLOR_BG,
-                        bordercolor=COLOR_RED, arrowcolor=COLOR_TEXT, width=12)
-        style.map("Dark.Vertical.TScrollbar", background=[('active', COLOR_RED_LIGHT)])
-        style.configure("Dark.Horizontal.TScrollbar", background=COLOR_RED, troughcolor=COLOR_BG,
-                        bordercolor=COLOR_RED, arrowcolor=COLOR_TEXT, width=12)
-        style.map("Dark.Horizontal.TScrollbar", background=[('active', COLOR_RED_LIGHT)])
-
         self.main_frame = ctk.CTkFrame(self.root, fg_color=COLOR_BG, border_color=COLOR_BORDER, border_width=2)
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
+        self.setup_status_bar()
         self.setup_control_panel()
         self.setup_scan_conditions()
         self.setup_table_area()
-        self.setup_status_bar()
 
     def _make_color_tag(self, parent, text, cat_id, variable, command, font_size=12):
         color = self.category_colors.get(cat_id, COLOR_BG)
@@ -660,7 +675,7 @@ class GarbageCleanupTool:
         cb = ctk.CTkCheckBox(tag_frame, text=text, variable=variable, command=command,
                             fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                             checkmark_color=COLOR_TEXT, text_color=COLOR_TEXT,
-                            font=ctk.CTkFont(size=font_size), corner_radius=4,
+                            font=ctk.CTkFont(family=FONT_FAMILY, size=font_size), corner_radius=4,
                             bg_color=color, border_width=0)
         cb.pack(padx=4, pady=2)
 
@@ -675,7 +690,7 @@ class GarbageCleanupTool:
         control_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
         control_frame.pack(fill="x", padx=10, pady=(10, 5))
 
-        ctk.CTkLabel(control_frame, text="📁", font=ctk.CTkFont(size=16)).pack(side="left", padx=(10, 3))
+        ctk.CTkLabel(control_frame, text="📁", font=ctk.CTkFont(family=FONT_FAMILY, size=16)).pack(side="left", padx=(10, 3))
 
         self.dir_entry = ctk.CTkEntry(control_frame, placeholder_text="选择要扫描的目录...",
                                      fg_color="#2a2a2a", border_color="#444",
@@ -685,17 +700,19 @@ class GarbageCleanupTool:
             self.dir_entry.insert(0, self.settings["scan_directory"])
 
         ctk.CTkButton(control_frame, text="浏览", width=60, height=34, command=self.browse_directory,
-                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(size=13)).pack(side="left", padx=3)
-        ctk.CTkButton(control_frame, text="🔍 扫描", font=ctk.CTkFont(size=13, weight="bold"), height=34,
-                     fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, command=self.start_scan).pack(side="left", padx=3)
+                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13)).pack(side="left", padx=3)
+        self.scan_btn = ctk.CTkButton(control_frame, text="🔍 开始扫描", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"), height=34,
+                     fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, command=self.start_scan)
+        self.scan_btn.pack(side="left", padx=3)
+        self.pause_btn = ctk.CTkButton(control_frame, text="⏸ 暂停", height=34, command=self.pause_scan,
+                                        fg_color="#333", hover_color="#555", text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13))
+        self.cancel_btn = ctk.CTkButton(control_frame, text="✕ 取消", height=34, command=self.cancel_scan,
+                                         fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13))
         ctk.CTkButton(control_frame, text="🔍 重复检测", height=34, command=self.start_duplicate_scan,
-                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(size=13)).pack(side="left", padx=3)
-        self.stop_button = ctk.CTkButton(control_frame, text="⏹ 停止", height=34, command=self.stop_scan,
-                                        state="disabled", fg_color="#333", hover_color=COLOR_RED,
-                                        text_color=COLOR_TEXT, font=ctk.CTkFont(size=13))
-        self.stop_button.pack(side="left", padx=3)
-        ctk.CTkButton(control_frame, text="🗑️ 删除选中", font=ctk.CTkFont(size=13, weight="bold"), height=34,
+                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13)).pack(side="left", padx=3)
+        ctk.CTkButton(control_frame, text="🗑️ 删除选中", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"), height=34,
                      fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, command=self.delete_selected_files).pack(side="right", padx=(3, 10))
+        self._update_scan_button_state("idle")
 
     def setup_scan_conditions(self):
         saved_enabled = self.settings.get("category_enabled", {})
@@ -706,7 +723,7 @@ class GarbageCleanupTool:
         func_row = ctk.CTkFrame(self._func_frame, fg_color="#1e1e1e")
         func_row.pack(fill="x", padx=8, pady=6)
 
-        ctk.CTkLabel(func_row, text="功能设置", font=ctk.CTkFont(size=12, weight="bold"),
+        ctk.CTkLabel(func_row, text="功能设置", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
                     text_color=COLOR_DIM).pack(side="left", padx=(0, 8))
 
         func_buttons = [
@@ -717,26 +734,27 @@ class GarbageCleanupTool:
         ]
         for text, cmd in func_buttons:
             ctk.CTkButton(func_row, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
-                         text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=cmd).pack(side="left", padx=3)
+                         text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=cmd).pack(side="left", padx=10)
 
         self.cat_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
         self.cat_frame.pack(fill="x", padx=10, pady=2)
 
-        cat_grid = ctk.CTkFrame(self.cat_frame, fg_color="#1e1e1e")
-        cat_grid.pack(fill="x", padx=8, pady=6)
+        self._cat_grid = ctk.CTkFrame(self.cat_frame, fg_color="#1e1e1e")
+        self._cat_grid.pack(fill="x", padx=8, pady=6)
 
-        ctk.CTkLabel(cat_grid, text="文件类型", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=COLOR_DIM).grid(row=0, column=0, padx=(0, 6), sticky="w")
+        ctk.CTkLabel(self._cat_grid, text="文件类型", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                    text_color=COLOR_DIM).grid(row=0, column=0, padx=(0, 8), sticky="nw")
 
         top_level_cats = [(cid, cinfo) for cid, cinfo in CATEGORY_TREE.items() if cinfo.get("parent") is None]
-        COL_WIDTH = 240
 
-        self._cat_rows = []
         self._cat_child_containers = {}
         self._cat_color_btns = {}
         self._cat_tag_frames = {}
         self._child_checkboxes = {}
-        self._all_expanded = False
+        self._cat_expanded = False
+        self._cat_col_map = {}
+        self._cat_cell_frames = {}
+        self._cat_dropdowns = {}
 
         col_idx = 1
         for cat_id, cat_info in top_level_cats:
@@ -748,15 +766,22 @@ class GarbageCleanupTool:
             cmd = (lambda cid=cat_id: self.on_parent_toggle(cid)) if has_children else self.on_category_toggle
 
             color = self.category_colors.get(cat_id, COLOR_BG)
-            tag_frame = ctk.CTkFrame(cat_grid, fg_color=color, corner_radius=6)
-            tag_frame.grid(row=0, column=col_idx, padx=3, pady=2, sticky="ew")
+
+            cell_frame = ctk.CTkFrame(self._cat_grid, fg_color="#1e1e1e")
+            cell_frame.grid(row=0, column=col_idx, padx=2, pady=2, sticky="nw")
+
+            primary_row = ctk.CTkFrame(cell_frame, fg_color="#1e1e1e")
+            primary_row.pack(fill="x")
+
+            tag_frame = ctk.CTkFrame(primary_row, fg_color=color, corner_radius=4)
+            tag_frame.pack(side="left", padx=(0, 0), pady=0)
             self._cat_tag_frames[cat_id] = tag_frame
 
             cb = ctk.CTkCheckBox(tag_frame, text=cat_info["name"], variable=var, command=cmd,
                                 fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                                 checkmark_color=COLOR_TEXT, text_color=COLOR_TEXT,
-                                font=ctk.CTkFont(size=12), corner_radius=4,
-                                bg_color=color, border_width=0)
+                                font=ctk.CTkFont(family=FONT_FAMILY, size=12), corner_radius=4,
+                                bg_color=color, border_width=0, height=24)
             cb.pack(side="left", padx=4, pady=2)
 
             tooltip_text = cat_info.get("tooltip", "")
@@ -764,148 +789,107 @@ class GarbageCleanupTool:
                 ToolTip(cb, tooltip_text)
                 ToolTip(tag_frame, tooltip_text)
 
-            color_btn = ctk.CTkButton(tag_frame, text="调色", width=36, height=22, fg_color="#444", hover_color=COLOR_RED,
-                                     text_color=COLOR_DIM, font=ctk.CTkFont(size=10),
+            color_btn = ctk.CTkButton(primary_row, text="调色", width=28, height=24, fg_color="#444", hover_color="#555",
+                                     text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=9),
                                      command=lambda cid=cat_id: self._pick_color_inline(cid))
-            color_btn.pack(side="left", padx=(0, 4))
+            color_btn.pack(side="left", padx=(2, 0))
             self._cat_color_btns[cat_id] = color_btn
 
-            if has_children:
-                child_container = ctk.CTkFrame(cat_grid, fg_color="#1e1e1e", border_width=1, border_color="#333")
-                child_container.grid(row=1, column=col_idx, padx=3, pady=(2, 2), sticky="ew")
-                child_container.grid_remove()
-
-                for child_id in cat_info.get("children", []):
-                    child_info_d = CATEGORY_TREE.get(child_id, {})
-                    default_val_c = saved_enabled.get(child_id, True)
-                    child_var = ctk.BooleanVar(value=default_val_c)
-                    self.preset_vars[child_id] = child_var
-
-                    child_frame = ctk.CTkFrame(child_container, fg_color="#1e1e1e")
-                    child_frame.pack(fill="x", pady=1, padx=4)
-
-                    text_color = CATEGORY_TEXT_COLORS.get(child_id, COLOR_TEXT)
-                    child_cb = ctk.CTkCheckBox(child_frame, text=child_info_d["name"], variable=child_var,
-                                              command=lambda cid=child_id: self.on_child_toggle(cid),
-                                              fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                                              checkmark_color=text_color, text_color=text_color,
-                                              font=ctk.CTkFont(size=11), corner_radius=4,
-                                              bg_color="#1e1e1e", border_width=0)
-                    child_cb.pack(side="left", padx=3, pady=2)
-
-                    self._child_checkboxes[child_id] = child_cb
-
-                    tooltip_text = child_info_d.get("tooltip", "")
-                    if tooltip_text:
-                        ToolTip(child_cb, tooltip_text)
-
-                    child_color_btn = ctk.CTkButton(child_frame, text="调色", width=36, height=20, fg_color="#333",
-                                                  hover_color=COLOR_RED, text_color=COLOR_DIM, font=ctk.CTkFont(size=9),
-                                                  command=lambda cid=child_id: self._pick_color_inline(cid))
-                    child_color_btn.pack(side="left", padx=3)
-                    self._cat_color_btns[child_id] = child_color_btn
-
-                self._cat_child_containers[cat_id] = child_container
-
-            cat_grid.grid_columnconfigure(col_idx, minsize=COL_WIDTH)
+            self._cat_col_map[cat_id] = col_idx
+            self._cat_cell_frames[cat_id] = cell_frame
             col_idx += 1
 
-        expand_btn_frame = ctk.CTkFrame(cat_grid, fg_color="#1e1e1e")
-        expand_btn_frame.grid(row=0, column=col_idx, padx=3, pady=2, sticky="w")
-        
-        self._expand_all_btn = ctk.CTkButton(expand_btn_frame, text="📂 全部展开", width=100, height=28,
+        expand_col = col_idx
+        self._expand_all_btn = ctk.CTkButton(self._cat_grid, text="📂 全部展开", width=80, height=26,
                                              fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT,
-                                             font=ctk.CTkFont(size=12), command=self._toggle_all_categories)
-        self._expand_all_btn.pack(padx=4, pady=2)
+                                             font=ctk.CTkFont(family=FONT_FAMILY, size=11), command=self._toggle_all_categories)
+        self._expand_all_btn.grid(row=0, column=expand_col, padx=(6, 4), sticky="nw")
 
-        self.filter_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
-        self.filter_frame.pack(fill="x", padx=10, pady=2)
+        self.merged_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
+        self.merged_frame.pack(fill="x", padx=10, pady=2)
 
-        filter_row = ctk.CTkFrame(self.filter_frame, fg_color="#1e1e1e")
-        filter_row.pack(fill="x", padx=8, pady=6)
+        merged_row = ctk.CTkFrame(self.merged_frame, fg_color="#1e1e1e")
+        merged_row.pack(fill="x", padx=8, pady=6)
 
-        ctk.CTkLabel(filter_row, text="过滤条件", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=COLOR_DIM).pack(side="left", padx=(0, 10))
-        ctk.CTkLabel(filter_row, text="时间 ≥", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 2))
+        ctk.CTkLabel(merged_row, text="过滤条件", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                    text_color=COLOR_DIM).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(merged_row, text="时间 ≥", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 2))
 
-        self.days_var = ctk.CTkComboBox(filter_row, values=["0", "7", "30", "90", "180", "365"],
+        self.days_var = ctk.CTkComboBox(merged_row, values=["0", "7", "30", "90", "180", "365"],
                                        width=65, height=26, fg_color="#2a2a2a", border_color="#444",
                                        text_color=COLOR_TEXT, dropdown_fg_color="#2a2a2a",
                                        dropdown_hover_color=COLOR_RED_LIGHT, dropdown_text_color=COLOR_TEXT,
                                        button_color=COLOR_RED, button_hover_color=COLOR_RED_LIGHT,
-                                       font=ctk.CTkFont(size=12), command=lambda v: self._auto_save())
+                                       font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=lambda v: self._auto_save())
         self.days_var.set(self.settings.get("days_value", "0"))
         self.days_var.pack(side="left", padx=(0, 2))
 
-        ctk.CTkLabel(filter_row, text="天前", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(merged_row, text="天前", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 8))
 
         self.size_enabled_var = ctk.BooleanVar(value=self.settings.get("size_enabled", False))
-        ctk.CTkCheckBox(filter_row, text="大小", variable=self.size_enabled_var,
+        ctk.CTkCheckBox(merged_row, text="大小", variable=self.size_enabled_var,
                        command=self.toggle_file_size_condition, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                       checkmark_color=COLOR_TEXT, text_color=COLOR_TEXT, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 2))
+                       checkmark_color=COLOR_TEXT, text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=(0, 2))
 
         self.size_operator_var = ctk.StringVar(value=self.settings.get("size_operator", ">"))
-        ctk.CTkOptionMenu(filter_row, variable=self.size_operator_var, values=[">", "<"],
+        ctk.CTkOptionMenu(merged_row, variable=self.size_operator_var, values=[">", "<"],
                         command=lambda v: self.update_file_size_condition(), width=45, height=26,
                         fg_color="#2a2a2a", button_color=COLOR_RED, button_hover_color=COLOR_RED_LIGHT,
                         text_color=COLOR_TEXT, dropdown_fg_color="#2a2a2a",
                         dropdown_hover_color=COLOR_RED_LIGHT, dropdown_text_color=COLOR_TEXT,
-                        font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 2))
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=(0, 2))
 
-        self.size_value_entry = ctk.CTkEntry(filter_row, placeholder_text="值", width=55, height=26,
+        self.size_value_entry = ctk.CTkEntry(merged_row, placeholder_text="值", width=55, height=26,
                                            fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
-                                           placeholder_text_color=COLOR_DIM, font=ctk.CTkFont(size=12))
+                                           placeholder_text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=12))
         sv = self.settings.get("size_value", "")
         if sv:
             self.size_value_entry.insert(0, sv)
         self.size_value_entry.pack(side="left", padx=(0, 2))
 
         self.size_unit_var = ctk.StringVar(value=self.settings.get("size_unit", "MB"))
-        ctk.CTkOptionMenu(filter_row, variable=self.size_unit_var, values=["KB", "MB", "GB"],
+        ctk.CTkOptionMenu(merged_row, variable=self.size_unit_var, values=["KB", "MB", "GB"],
                         command=lambda v: self.update_file_size_condition(), width=50, height=26,
                         fg_color="#2a2a2a", button_color=COLOR_RED, button_hover_color=COLOR_RED_LIGHT,
                         text_color=COLOR_TEXT, dropdown_fg_color="#2a2a2a",
                         dropdown_hover_color=COLOR_RED_LIGHT, dropdown_text_color=COLOR_TEXT,
-                        font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 12))
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=(0, 8))
 
         self.mode_var = ctk.StringVar(value=self.settings.get("mode_value", "stacked"))
-        ctk.CTkOptionMenu(filter_row, variable=self.mode_var, values=["stacked", "filtered"],
+        ctk.CTkOptionMenu(merged_row, variable=self.mode_var, values=["stacked", "filtered"],
                         command=lambda v: self._auto_save(), width=70, height=26,
                         fg_color="#2a2a2a", button_color=COLOR_RED, button_hover_color=COLOR_RED_LIGHT,
                         text_color=COLOR_TEXT, dropdown_fg_color="#2a2a2a",
                         dropdown_hover_color=COLOR_RED_LIGHT, dropdown_text_color=COLOR_TEXT,
-                        font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 2))
-        ctk.CTkLabel(filter_row, text="叠加|筛选", font=ctk.CTkFont(size=10), text_color=COLOR_DIM).pack(side="left")
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=(0, 2))
+        ctk.CTkLabel(merged_row, text="叠加|筛选", font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=COLOR_DIM).pack(side="left", padx=(0, 12))
 
-        self.custom_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
-        self.custom_frame.pack(fill="x", padx=10, pady=2)
-
-        custom_row = ctk.CTkFrame(self.custom_frame, fg_color="#1e1e1e")
-        custom_row.pack(fill="x", padx=8, pady=6)
+        sep = ctk.CTkFrame(merged_row, fg_color="#444", width=1, height=20)
+        sep.pack(side="left", padx=(0, 8))
 
         self.custom_enabled_var = ctk.BooleanVar(value=self.settings.get("custom_enabled", False))
-        self._make_color_tag(custom_row, "自定义规则", "custom", self.custom_enabled_var,
+        self._make_color_tag(merged_row, "自定义规则", "custom", self.custom_enabled_var,
                             self.on_category_toggle, font_size=12)
 
         self.custom_rule_type_var = ctk.StringVar(value="suffix")
-        ctk.CTkOptionMenu(custom_row, variable=self.custom_rule_type_var,
+        ctk.CTkOptionMenu(merged_row, variable=self.custom_rule_type_var,
                         values=["suffix", "regex", "name_fuzzy", "name_exact"],
                         width=90, height=26, fg_color="#2a2a2a", button_color=COLOR_RED,
                         button_hover_color=COLOR_RED_LIGHT, text_color=COLOR_TEXT,
                         dropdown_fg_color="#2a2a2a", dropdown_hover_color=COLOR_RED_LIGHT,
-                        dropdown_text_color=COLOR_TEXT, font=ctk.CTkFont(size=11)).pack(side="left", padx=(4, 4))
+                        dropdown_text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11)).pack(side="left", padx=(4, 4))
 
-        self.custom_rule_entry = ctk.CTkEntry(custom_row, placeholder_text="后缀/正则/文件名...",
+        self.custom_rule_entry = ctk.CTkEntry(merged_row, placeholder_text="后缀/正则/文件名...",
                                              fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
-                                             placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12))
+                                             placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(family=FONT_FAMILY, size=12))
         self.custom_rule_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        ctk.CTkButton(custom_row, text="+", width=26, height=26, command=self.add_custom_rule,
+        ctk.CTkButton(merged_row, text="+", width=26, height=26, command=self.add_custom_rule,
                      fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, text_color=COLOR_TEXT,
-                     font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=(0, 2))
-        ctk.CTkButton(custom_row, text="✕", width=26, height=26, command=self.clear_custom_rules,
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold")).pack(side="left", padx=(0, 2))
+        ctk.CTkButton(merged_row, text="✕", width=26, height=26, command=self.clear_custom_rules,
                      fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT,
-                     font=ctk.CTkFont(size=11)).pack(side="left")
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=11)).pack(side="left")
 
         self._rebuild_rules_display()
         self.update_scan_conditions()
@@ -923,13 +907,57 @@ class GarbageCleanupTool:
         self.on_category_toggle()
 
     def _toggle_all_categories(self):
-        self._all_expanded = not self._all_expanded
-        for cat_id, child_container in self._cat_child_containers.items():
-            if self._all_expanded:
-                child_container.grid()
-            else:
-                child_container.grid_remove()
-        self._expand_all_btn.configure(text="📂 全部折叠" if self._all_expanded else "📂 全部展开")
+        if self._cat_expanded:
+            for cat_id, dropdown in list(self._cat_dropdowns.items()):
+                dropdown.destroy()
+            self._cat_dropdowns.clear()
+            self._cat_expanded = False
+            self._expand_all_btn.configure(text="📂 全部展开")
+            return
+        self._cat_expanded = True
+        self._expand_all_btn.configure(text="📂 全部折叠")
+
+        for cat_id, cell_frame in self._cat_cell_frames.items():
+            cat_info = CATEGORY_TREE.get(cat_id, {})
+            children = cat_info.get("children", [])
+            if not children:
+                continue
+            color = self.category_colors.get(cat_id, COLOR_BG)
+
+            dropdown = ctk.CTkFrame(cell_frame, fg_color=color, corner_radius=4)
+            dropdown.pack(fill="x", pady=(2, 0))
+
+            for child_id in children:
+                child_info_d = CATEGORY_TREE.get(child_id, {})
+                if child_id not in self.preset_vars:
+                    default_val_c = self.settings.get("enabled_categories", {}).get(child_id, True)
+                    child_var = ctk.BooleanVar(value=default_val_c)
+                    self.preset_vars[child_id] = child_var
+
+                child_row = ctk.CTkFrame(dropdown, fg_color=color)
+                child_row.pack(fill="x", padx=4, pady=1)
+
+                child_text_color = CATEGORY_TEXT_COLORS.get(child_id, COLOR_TEXT)
+                child_cb = ctk.CTkCheckBox(child_row, text=child_info_d["name"], variable=self.preset_vars[child_id],
+                                          command=lambda cid=child_id: self.on_child_toggle(cid),
+                                          fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                                          checkmark_color=child_text_color, text_color=child_text_color,
+                                          font=ctk.CTkFont(family=FONT_FAMILY, size=11), corner_radius=4,
+                                          bg_color=color, border_width=0)
+                child_cb.pack(side="left", padx=2, pady=1)
+                self._child_checkboxes[child_id] = child_cb
+
+                tooltip_text = child_info_d.get("tooltip", "")
+                if tooltip_text:
+                    ToolTip(child_cb, tooltip_text)
+
+                child_color_btn = ctk.CTkButton(child_row, text="调色", width=28, height=18, fg_color="#444",
+                                              hover_color="#555", text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+                                              command=lambda cid=child_id: self._pick_color_inline(cid))
+                child_color_btn.pack(side="left", padx=(2, 0))
+                self._cat_color_btns[child_id] = child_color_btn
+
+            self._cat_dropdowns[cat_id] = dropdown
 
     def _pick_color_inline(self, cat_id):
         current = self.category_colors.get(cat_id, COLOR_BG)
@@ -947,9 +975,6 @@ class GarbageCleanupTool:
             tag_frame = self._cat_tag_frames.get(cat_id)
             if tag_frame:
                 tag_frame.configure(fg_color=color)
-                for child in tag_frame.winfo_children():
-                    if isinstance(child, ctk.CTkCheckBox):
-                        child.configure(bg_color=color)
         for child_id, child_cb in self._child_checkboxes.items():
             text_color = CATEGORY_TEXT_COLORS.get(child_id, COLOR_TEXT)
             child_cb.configure(text_color=text_color, checkmark_color=text_color)
@@ -984,6 +1009,8 @@ class GarbageCleanupTool:
         if self.custom_enabled_var.get():
             active.add("custom")
 
+        batch_check = []
+        batch_uncheck = []
         for item in self.tree.get_children():
             values = self.tree.item(item, "values")
             tags = self.tree.item(item, "tags")
@@ -992,10 +1019,19 @@ class GarbageCleanupTool:
             cat_key = CATEGORY_TO_CHECKBOX.get(category, "")
             if cat_key and cat_key in active:
                 self.selected_files.add(file_path)
-                self.tree.item(item, values=("☑", *values[1:]))
+                batch_check.append(item)
             else:
                 self.selected_files.discard(file_path)
-                self.tree.item(item, values=("☐", *values[1:]))
+                batch_uncheck.append(item)
+        for item in batch_check:
+            vals = list(self.tree.item(item, "values"))
+            vals[0] = "☑"
+            self.tree.item(item, values=vals)
+        for item in batch_uncheck:
+            vals = list(self.tree.item(item, "values"))
+            vals[0] = "☐"
+            self.tree.item(item, values=vals)
+        self._recompute_selected_size()
         self._update_selected_size_display()
 
     def _destroy_current_panel(self):
@@ -1003,6 +1039,13 @@ class GarbageCleanupTool:
             self._current_panel.destroy()
             self._current_panel = None
             self._current_panel_type = None
+        if self._cat_expanded:
+            for cat_id, dropdown in list(self._cat_dropdowns.items()):
+                dropdown.destroy()
+            self._cat_dropdowns.clear()
+            self._cat_expanded = False
+            if hasattr(self, '_expand_all_btn'):
+                self._expand_all_btn.configure(text="📂 全部展开")
 
     def toggle_settings_panel(self):
         if self._current_panel_type == "settings":
@@ -1018,7 +1061,7 @@ class GarbageCleanupTool:
         hw_row = ctk.CTkFrame(panel, fg_color="#252525")
         hw_row.pack(fill="x", padx=10, pady=(8, 4))
         ctk.CTkLabel(hw_row, text=f"💻 {sys_info['total_ram_gb']}GB | {sys_info['cpu_physical']}核{sys_info['cpu_logical']}线程",
-                    font=ctk.CTkFont(size=12), text_color=COLOR_DIM).pack(side="left")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_DIM).pack(side="left")
         params_row = ctk.CTkFrame(panel, fg_color="#252525")
         params_row.pack(fill="x", padx=10, pady=4)
         entries = {}
@@ -1029,9 +1072,9 @@ class GarbageCleanupTool:
             ("flush_interval", "刷新间隔", str(self._flush_interval), str(rec["flush_interval"])),
         ]
         for key, label, current, default in items:
-            ctk.CTkLabel(params_row, text=label, font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 2))
+            ctk.CTkLabel(params_row, text=label, font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 2))
             entry = ctk.CTkEntry(params_row, width=60, height=26, fg_color="#2a2a2a", border_color="#444",
-                               text_color=COLOR_TEXT, font=ctk.CTkFont(size=12))
+                               text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12))
             entry.pack(side="left", padx=(0, 2))
             entry.insert(0, current)
             entries[key] = entry
@@ -1057,9 +1100,9 @@ class GarbageCleanupTool:
                 messagebox.showerror("输入错误", "请输入有效的数值")
 
         ctk.CTkButton(btn_row, text="应用推荐值", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=apply_rec).pack(side="left", padx=(0, 5))
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=apply_rec).pack(side="left", padx=(0, 5))
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_inline).pack(side="left", padx=5)
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=save_inline).pack(side="left", padx=5)
 
     def toggle_delete_settings_panel(self):
         if self._current_panel_type == "delete":
@@ -1072,18 +1115,18 @@ class GarbageCleanupTool:
         self._current_panel_type = "delete"
         mode_row = ctk.CTkFrame(panel, fg_color="#252525")
         mode_row.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(mode_row, text="删除方式", font=ctk.CTkFont(size=12, weight="bold"), text_color=COLOR_TEXT).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(mode_row, text="删除方式", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=COLOR_TEXT).pack(side="left", padx=(0, 10))
         del_mode_var = ctk.StringVar(value=self.delete_mode)
         for val, label in [("permanent", "彻底删除"), ("recycle", "删除到回收站"), ("move", "移动到文件夹"), ("compress", "压缩为压缩包")]:
             ctk.CTkRadioButton(mode_row, text=label, variable=del_mode_var, value=val,
                               fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, text_color=COLOR_TEXT,
-                              font=ctk.CTkFont(size=12)).pack(side="left", padx=5)
+                              font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=5)
         detail_row = ctk.CTkFrame(panel, fg_color="#252525")
         detail_row.pack(fill="x", padx=10, pady=4)
-        ctk.CTkLabel(detail_row, text="移动目录", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(detail_row, text="移动目录", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
         move_dir_entry = ctk.CTkEntry(detail_row, placeholder_text="选择移动目标文件夹...",
                                      fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
-                                     placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12), width=300)
+                                     placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(family=FONT_FAMILY, size=12), width=300)
         move_dir_entry.pack(side="left", padx=(0, 4))
         move_dir_entry.insert(0, self.delete_move_dir)
 
@@ -1094,14 +1137,14 @@ class GarbageCleanupTool:
                 move_dir_entry.insert(0, d)
 
         ctk.CTkButton(detail_row, text="浏览", width=50, height=26, command=browse_move,
-                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 12))
-        ctk.CTkLabel(detail_row, text="压缩包名", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
+                     fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(detail_row, text="压缩包名", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
         zip_name_entry = ctk.CTkEntry(detail_row, placeholder_text="如 cleanup_{date}",
                                      fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
-                                     placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(size=12), width=180)
+                                     placeholder_text_color=COLOR_DIM, height=26, font=ctk.CTkFont(family=FONT_FAMILY, size=12), width=180)
         zip_name_entry.pack(side="left", padx=(0, 4))
         zip_name_entry.insert(0, self.delete_zip_name)
-        ctk.CTkLabel(detail_row, text="{date}=日期 {time}=时间", font=ctk.CTkFont(size=10), text_color=COLOR_DIM).pack(side="left")
+        ctk.CTkLabel(detail_row, text="{date}=日期 {time}=时间", font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=COLOR_DIM).pack(side="left")
         btn_row = ctk.CTkFrame(panel, fg_color="#252525")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
 
@@ -1115,7 +1158,7 @@ class GarbageCleanupTool:
             self._destroy_current_panel()
 
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_del).pack(side="left", padx=5)
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=save_del).pack(side="left", padx=5)
 
     def toggle_preset_rules_panel(self):
         if self._current_panel_type == "preset":
@@ -1127,28 +1170,34 @@ class GarbageCleanupTool:
         self._current_panel = panel
         self._current_panel_type = "preset"
 
-        ctk.CTkLabel(panel, text="预设规则包", font=ctk.CTkFont(size=12, weight="bold"),
-                    text_color=COLOR_TEXT).pack(anchor="w", padx=10, pady=(8, 4))
-
         rules_container = ctk.CTkFrame(panel, fg_color="#252525")
-        rules_container.pack(fill="x", padx=10, pady=4)
+        rules_container.pack(fill="x", padx=10, pady=(6, 4))
+        rules_container.grid_columnconfigure(0, weight=1)
+        rules_container.grid_columnconfigure(1, weight=1)
 
         rule_check_vars = {}
+        col = 0
+        row_idx = 0
         for rule_id, rule_info in PRESET_RULE_PACKS.items():
-            row = ctk.CTkFrame(rules_container, fg_color="#252525")
-            row.pack(fill="x", pady=2)
+            cell = ctk.CTkFrame(rules_container, fg_color="#252525")
+            cell.grid(row=row_idx, column=col, padx=2, pady=1, sticky="w")
 
             is_active = rule_id in self._active_rule_packs
             var = ctk.BooleanVar(value=is_active)
             rule_check_vars[rule_id] = var
 
-            ctk.CTkCheckBox(row, text=rule_info["name"], variable=var, fg_color=COLOR_RED,
+            ctk.CTkCheckBox(cell, text=rule_info["name"], variable=var, fg_color=COLOR_RED,
                           hover_color=COLOR_RED_LIGHT, checkmark_color=COLOR_TEXT,
-                          text_color=COLOR_TEXT, font=ctk.CTkFont(size=11),
-                          command=lambda rid=rule_id: self._on_rule_pack_toggle(rid)).pack(side="left", padx=(0, 6))
+                          text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                          command=lambda rid=rule_id: self._on_rule_pack_toggle(rid)).pack(side="left", padx=(0, 4))
 
-            ctk.CTkLabel(row, text=rule_info["desc"], font=ctk.CTkFont(size=10),
+            ctk.CTkLabel(cell, text=rule_info["desc"], font=ctk.CTkFont(family=FONT_FAMILY, size=10),
                         text_color=COLOR_DIM).pack(side="left")
+
+            col += 1
+            if col >= 2:
+                col = 0
+                row_idx += 1
 
         btn_row = ctk.CTkFrame(panel, fg_color="#252525")
         btn_row.pack(fill="x", padx=10, pady=(4, 8))
@@ -1161,17 +1210,17 @@ class GarbageCleanupTool:
             self._destroy_current_panel()
 
         ctk.CTkButton(btn_row, text="全选", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12),
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=lambda: [v.set(True) for v in rule_check_vars.values()]).pack(side="left", padx=(0, 5))
         ctk.CTkButton(btn_row, text="全不选", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12),
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=lambda: [v.set(False) for v in rule_check_vars.values()]).pack(side="left", padx=(0, 5))
         ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=save_rules).pack(side="left", padx=5)
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=save_rules).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="📁 导入规则", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=self._import_custom_rule_pack).pack(side="left", padx=5)
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=self._import_custom_rule_pack).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="📤 导出规则", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=self._export_custom_rule_pack).pack(side="left", padx=5)
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=self._export_custom_rule_pack).pack(side="left", padx=5)
 
     def _on_rule_pack_toggle(self, rule_id):
         pass
@@ -1242,39 +1291,55 @@ class GarbageCleanupTool:
         self._current_panel = panel
         self._current_panel_type = "analysis"
 
-        header = ctk.CTkFrame(panel, fg_color="#252525")
-        header.pack(fill="x", padx=12, pady=(8, 2))
-        ctk.CTkLabel(header, text="📊 分析报告", font=ctk.CTkFont(size=14, weight="bold"),
-                    text_color=COLOR_TEXT).pack(side="left")
-        ctk.CTkButton(header, text="✕", width=26, height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_DIM, font=ctk.CTkFont(size=12),
-                     command=self._destroy_current_panel).pack(side="right")
-
         content_row = ctk.CTkFrame(panel, fg_color="#252525")
-        content_row.pack(fill="x", padx=12, pady=(4, 8))
+        content_row.pack(fill="x", padx=12, pady=(6, 8))
         content_row.grid_columnconfigure(0, weight=0)
-        content_row.grid_columnconfigure(1, weight=1)
+        content_row.grid_columnconfigure(1, weight=0)
+        content_row.grid_columnconfigure(2, weight=1)
 
-        self._report_chart = tk.Canvas(content_row, bg="#252525", highlightthickness=0, width=260, height=260)
-        self._report_chart.grid(row=0, column=0, rowspan=2, padx=(0, 12), pady=0, sticky="n")
+        chart_col = ctk.CTkFrame(content_row, fg_color="#252525")
+        chart_col.grid(row=0, column=0, padx=(0, 6), pady=0, sticky="n")
+        ctk.CTkLabel(chart_col, text="分类占比", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+                     text_color=COLOR_TEXT).pack(anchor="w", padx=4, pady=(0, 2))
+        self._report_chart = tk.Canvas(chart_col, bg="#252525", highlightthickness=0, width=220, height=200)
+        self._report_chart.pack(padx=0, pady=0)
 
-        stats_frame = ctk.CTkFrame(content_row, fg_color="#2a2a2a", corner_radius=8, border_width=1, border_color="#444")
-        stats_frame.grid(row=0, column=1, sticky="new", pady=(0, 6))
+        legend_col = ctk.CTkFrame(content_row, fg_color="#252525", corner_radius=0)
+        legend_col.grid(row=0, column=1, padx=(0, 12), pady=0, sticky="ns")
+        ctk.CTkLabel(legend_col, text="占比分析", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+                     text_color=COLOR_TEXT).pack(anchor="w", padx=4, pady=(0, 2))
+        self._report_legend_frame = ctk.CTkFrame(legend_col, fg_color="#252525", corner_radius=0, width=240)
+        self._report_legend_frame.pack(fill="both", expand=True, padx=0, pady=0)
 
-        self._report_stats_label = ctk.CTkLabel(stats_frame, text="", font=ctk.CTkFont(size=13),
+        stats_advice_col = ctk.CTkFrame(content_row, fg_color="#2a2a2a", corner_radius=8, border_width=1, border_color="#444")
+        stats_advice_col.grid(row=0, column=2, sticky="nsew", padx=0, pady=0)
+
+        stats_header = ctk.CTkFrame(stats_advice_col, fg_color="#2a2a2a")
+        stats_header.pack(fill="x", padx=10, pady=(8, 2))
+        ctk.CTkLabel(stats_header, text="📋 扫描统计", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                     text_color=COLOR_TEXT).pack(side="left")
+
+        self._report_stats_label = ctk.CTkLabel(stats_advice_col, text="", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                                                  text_color=COLOR_TEXT, justify="left", anchor="w")
-        self._report_stats_label.pack(fill="x", padx=10, pady=6)
+        self._report_stats_label.pack(fill="x", padx=14, pady=(0, 4))
 
-        advice_frame = ctk.CTkFrame(content_row, fg_color="#2a2a2a", corner_radius=8, border_width=1, border_color="#444")
-        advice_frame.grid(row=1, column=1, sticky="new")
+        sep = ctk.CTkFrame(stats_advice_col, fg_color="#444", height=1)
+        sep.pack(fill="x", padx=8, pady=2)
 
-        self._report_advice_label = ctk.CTkLabel(advice_frame, text="", font=ctk.CTkFont(size=13),
+        advice_header = ctk.CTkFrame(stats_advice_col, fg_color="#2a2a2a")
+        advice_header.pack(fill="x", padx=10, pady=(4, 2))
+        ctk.CTkLabel(advice_header, text="💡 建议处理方案", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                     text_color=COLOR_TEXT).pack(side="left")
+
+        self._report_advice_label = ctk.CTkLabel(stats_advice_col, text="", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                                                   text_color=COLOR_TEXT, justify="left", anchor="w", wraplength=800)
-        self._report_advice_label.pack(fill="x", padx=10, pady=6)
+        self._report_advice_label.pack(fill="x", padx=14, pady=(0, 8))
 
-        self._do_verify_and_build_report()
+        self._report_stats_label.configure(text="正在校验文件...")
+        self._report_advice_label.configure(text="请稍候...")
+        threading.Thread(target=self._do_verify_and_build_report_bg, daemon=True).start()
 
-    def _do_verify_and_build_report(self):
+    def _do_verify_and_build_report_bg(self):
         removed = changed = 0
         valid = []
         for fi in self.file_list:
@@ -1294,13 +1359,6 @@ class GarbageCleanupTool:
                 self.selected_files.discard(fp)
                 continue
             valid.append(fi)
-        if removed > 0 or changed > 0:
-            self.file_list = valid
-            self.filtered_files = valid[:]
-            self.total_size = sum(fi["size"] for fi in valid)
-            self.display_files()
-            self._auto_save_results()
-            self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
 
         cat_sizes = {}
         cat_counts = {}
@@ -1311,40 +1369,50 @@ class GarbageCleanupTool:
         total_size = sum(cat_sizes.values())
         total_count = sum(cat_counts.values())
 
-        stats_text = f"📋 扫描统计\n   总文件数: {total_count}    总大小: {self._format_bytes(total_size)}"
+        stats_text = f"总文件数: {total_count}    总大小: {self._format_bytes(total_size)}"
         if removed > 0 or changed > 0:
-            stats_text += f"\n   ✅ 校验: 有效 {len(valid)} | 已删除 {removed} | 已变更 {changed}"
-        if hasattr(self, '_report_stats_label') and self._report_stats_label:
-            self._report_stats_label.configure(text=stats_text)
+            stats_text += f"\n校验: 有效 {len(valid)} | 已删除 {removed} | 已变更 {changed}"
 
         advice_lines = []
         sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
         if sorted_cats:
-            advice_lines.append("💡 建议处理方案")
             idx = 1
             top_cat, top_size = sorted_cats[0]
-            advice_lines.append(f"   {idx}. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
+            advice_lines.append(f"{idx}. {top_cat} 占比最大 ({self._format_bytes(top_size)})")
             if top_size > 1024 * 1024 * 1024:
-                advice_lines.append("      → 建议优先清理，可释放 >1GB")
+                advice_lines.append(f"   → 建议优先清理，可释放 >1GB")
             elif top_size > 100 * 1024 * 1024:
-                advice_lines.append("      → 建议清理，可释放 >100MB")
+                advice_lines.append(f"   → 建议清理，可释放 >100MB")
             idx += 1
             if cat_counts.get("duplicates", 0) > 0:
-                advice_lines.append(f"   {idx}. 发现 {cat_counts['duplicates']} 个重复文件 → 使用'重复检测'去重")
+                advice_lines.append(f"{idx}. 发现 {cat_counts['duplicates']} 个重复文件 → 使用'重复检测'去重")
                 idx += 1
             if cat_counts.get("empty_folders", 0) > 10:
-                advice_lines.append(f"   {idx}. 发现 {cat_counts['empty_folders']} 个空文件夹 → 可安全批量删除")
+                advice_lines.append(f"{idx}. 发现 {cat_counts['empty_folders']} 个空文件夹 → 可安全批量删除")
                 idx += 1
             if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
-                advice_lines.append(f"   {idx}. 缓存文件较多 → 建议定期清理缓存")
+                advice_lines.append(f"{idx}. 缓存文件较多 → 建议定期清理缓存")
                 idx += 1
         advice_lines.append("\n⚠️ 清理前建议备份重要文件 | 系统文件谨慎处理 | 建议使用'删除到回收站'")
 
-        if hasattr(self, '_report_advice_label') and self._report_advice_label:
-            self._report_advice_label.configure(text="\n".join(advice_lines))
+        def update_ui():
+            if removed > 0 or changed > 0:
+                self.file_list = valid
+                self.filtered_files = valid[:]
+                self.total_size = sum(fi["size"] for fi in valid)
+                for fi in valid:
+                    self._file_size_map[fi["path"]] = fi["size"]
+                self._recompute_selected_size()
+                self._auto_save_results()
+                self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
+            if hasattr(self, '_report_stats_label') and self._report_stats_label:
+                self._report_stats_label.configure(text=stats_text)
+            if hasattr(self, '_report_advice_label') and self._report_advice_label:
+                self._report_advice_label.configure(text="\n".join(advice_lines))
+            if hasattr(self, '_report_chart') and self._report_chart:
+                self._draw_report_pie(self._report_chart)
 
-        if hasattr(self, '_report_chart') and self._report_chart:
-            self._draw_report_pie(self._report_chart)
+        self.root.after(0, update_ui)
 
     def setup_table_area(self):
         table_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
@@ -1352,19 +1420,26 @@ class GarbageCleanupTool:
 
         tree_container = tk.Frame(table_frame, bg=COLOR_BG)
         tree_container.pack(fill="both", expand=True)
-
-        self.scrollbar_y = ttk.Scrollbar(tree_container, orient="vertical", style="Dark.Vertical.TScrollbar")
-        self.scrollbar_x = ttk.Scrollbar(tree_container, orient="horizontal", style="Dark.Horizontal.TScrollbar")
+        tree_container.grid_columnconfigure(0, weight=1)
+        tree_container.grid_rowconfigure(0, weight=1)
 
         columns = ("选择", "文件名", "完整路径", "大小", "修改时间", "类型", "分类")
         self.tree = ttk.Treeview(tree_container, columns=columns, show="headings", height=15, style="Dark.Treeview",
                                 yscrollcommand=self._on_yscroll, xscrollcommand=self._on_xscroll)
-        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.grid(row=0, column=0, sticky="nsew")
 
-        self.scrollbar_y.configure(command=self.tree.yview)
-        self.scrollbar_x.configure(command=self.tree.xview)
+        self.scrollbar_y = ctk.CTkScrollbar(tree_container, orientation="vertical",
+                                             command=self.tree.yview,
+                                             fg_color="#1a1a1a", button_color="#3a3a3a",
+                                             button_hover_color="#4a4a4a", corner_radius=4,
+                                             width=8)
+        self.scrollbar_x = ctk.CTkScrollbar(tree_container, orientation="horizontal",
+                                             command=self.tree.xview,
+                                             fg_color="#1a1a1a", button_color="#3a3a3a",
+                                             button_hover_color="#4a4a4a", corner_radius=4,
+                                             height=8)
 
-        self.tree.heading("选择", text="☑️全选", command=self.toggle_select_all)
+        self.tree.heading("选择", text="☑", command=self.toggle_select_all)
         self.tree.heading("文件名", text="文件名 ▲▼", command=lambda: self.sort_by_column("文件名"))
         self.tree.heading("完整路径", text="完整路径 ▲▼", command=lambda: self.sort_by_column("完整路径"))
         self.tree.heading("大小", text="大小 ▲▼", command=lambda: self.sort_by_column("大小"))
@@ -1404,7 +1479,8 @@ class GarbageCleanupTool:
             cat_sizes[cat] = cat_sizes.get(cat, 0) + fi["size"]
         sorted_cats = sorted(cat_sizes.items(), key=lambda x: x[1], reverse=True)
         if not sorted_cats:
-            canvas.create_text(130, 130, text="暂无数据", fill=COLOR_DIM, font=("Arial", 14))
+            canvas.create_text(110, 100, text="暂无数据", fill=COLOR_DIM, font=("Microsoft YaHei UI", 14))
+            self._populate_legend([], 0, name_to_id)
             return
         top_cats = sorted_cats[:8]
         other_size = sum(s for _, s in sorted_cats[8:])
@@ -1418,37 +1494,81 @@ class GarbageCleanupTool:
                 return self.category_colors.get(cid, "#333333")
             return "#333333"
 
-        def get_cat_text_color(cat_name):
-            cid = name_to_id.get(cat_name, "")
-            if cid:
-                return CATEGORY_TEXT_COLORS.get(cid, COLOR_TEXT)
-            return COLOR_TEXT
-
         canvas.delete("all")
-        cx, cy, r = 130, 110, 85
+        cx, cy, r = 110, 100, 90
         start_angle = 90
         for i, (cat, size) in enumerate(top_cats):
             extent = (size / total) * 360 if total > 0 else 0
             color = get_cat_color(cat)
             canvas.create_arc(cx - r, cy - r, cx + r, cy + r,
                             start=start_angle, extent=extent,
-                            fill=color, outline="#252525", width=2, style="pieslice")
+                            fill=color, outline="#2a2a2a", width=2, style="pieslice")
             mid_angle = start_angle + extent / 2
-            if extent > 12:
+            if extent > 10:
                 pct = (size / total) * 100
                 tx = cx + (r * 0.6) * math.cos(math.radians(mid_angle))
                 ty = cy - (r * 0.6) * math.sin(math.radians(mid_angle))
-                canvas.create_text(tx, ty, text=f"{pct:.0f}%", fill="white", font=("Arial", 10, "bold"))
+                canvas.create_text(tx, ty, text=f"{pct:.0f}%", fill="white", font=("Microsoft YaHei UI", 9, "bold"))
             start_angle += extent
-        canvas.create_text(cx, cy - r - 12, text="分类占比", fill=COLOR_TEXT, font=("Arial", 12, "bold"))
-        ly = cy + r + 14
+
+        self._populate_legend(top_cats, total, name_to_id)
+
+    def _populate_legend(self, top_cats, total, name_to_id):
+        if not hasattr(self, '_report_legend_frame') or not self._report_legend_frame:
+            return
+        try:
+            if not self._report_legend_frame.winfo_exists():
+                return
+        except Exception:
+            return
+        for child in self._report_legend_frame.winfo_children():
+            child.destroy()
+
+        def get_cat_color(cat_name):
+            cid = name_to_id.get(cat_name, "")
+            if cid:
+                return self.category_colors.get(cid, "#333333")
+            return "#333333"
+
+        def get_cat_text_color(cat_name):
+            cid = name_to_id.get(cat_name, "")
+            if cid:
+                return CATEGORY_TEXT_COLORS.get(cid, COLOR_TEXT)
+            return COLOR_TEXT
+
         for i, (cat, size) in enumerate(top_cats):
             color = get_cat_color(cat)
             text_color = get_cat_text_color(cat)
-            canvas.create_rectangle(8, ly, 20, ly + 10, fill=color, outline="")
             pct = (size / total) * 100 if total > 0 else 0
-            canvas.create_text(24, ly + 5, text=f"{cat}  {self._format_bytes(size)}  ({pct:.1f}%)", fill=text_color, font=("Arial", 10), anchor="w")
-            ly += 16
+
+            row = ctk.CTkFrame(self._report_legend_frame, fg_color="#2a2a2a", corner_radius=6, height=32)
+            row.pack(fill="x", pady=(1, 1), padx=2)
+            row.pack_propagate(False)
+
+            indicator = ctk.CTkFrame(row, fg_color=color, corner_radius=3, width=6)
+            indicator.pack(side="left", padx=(6, 4), pady=7)
+            indicator.pack_propagate(False)
+
+            name_label = ctk.CTkLabel(row, text=cat, font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+                                       text_color=text_color, width=66, anchor="w")
+            name_label.pack(side="left", padx=(0, 4), pady=4)
+
+            bar_bg = ctk.CTkFrame(row, fg_color="#1a1a1a", corner_radius=3, height=8, width=56)
+            bar_bg.pack(side="left", padx=(0, 4), pady=4)
+            bar_bg.pack_propagate(False)
+
+            bar_w = max(2, int(56 * pct / 100))
+            bar_fill = ctk.CTkFrame(bar_bg, fg_color=color, corner_radius=3, width=bar_w, height=8)
+            bar_fill.pack(side="left", padx=0, pady=0)
+            bar_fill.pack_propagate(False)
+
+            pct_label = ctk.CTkLabel(row, text=f"{pct:.1f}%", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                                      text_color=text_color, width=44, anchor="e")
+            pct_label.pack(side="left", padx=(0, 4), pady=4)
+
+            size_label = ctk.CTkLabel(row, text=self._format_bytes(size), font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                                       text_color=COLOR_DIM, width=56, anchor="e")
+            size_label.pack(side="left", padx=(0, 6), pady=4)
 
     def _format_bytes(self, size_bytes):
         if size_bytes == 0: return "0 B"
@@ -1461,20 +1581,16 @@ class GarbageCleanupTool:
     def _on_yscroll(self, first, last):
         self.scrollbar_y.set(float(first), float(last))
         if float(first) <= 0.0 and float(last) >= 1.0:
-            self.scrollbar_y.pack_forget()
+            self.scrollbar_y.grid_remove()
         else:
-            if not self.scrollbar_y.winfo_ismapped():
-                self.scrollbar_y.pack(side="right", fill="y", before=self.tree)
+            self.scrollbar_y.grid(row=0, column=1, sticky="ns")
 
     def _on_xscroll(self, first, last):
         self.scrollbar_x.set(float(first), float(last))
         if float(first) <= 0.0 and float(last) >= 1.0:
-            self.scrollbar_x.pack_forget()
+            self.scrollbar_x.grid_remove()
         else:
-            if not self.scrollbar_y.winfo_ismapped():
-                self.scrollbar_x.pack(side="bottom", fill="x", before=self.tree)
-            else:
-                self.scrollbar_x.pack(side="bottom", fill="x")
+            self.scrollbar_x.grid(row=1, column=0, sticky="ew")
 
     def _snapshot_column_widths(self):
         self._prev_column_widths = {}
@@ -1518,13 +1634,23 @@ class GarbageCleanupTool:
 
     def setup_status_bar(self):
         status_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
-        status_frame.pack(fill="x", padx=10, pady=(2, 4))
+        status_frame.pack(side="bottom", fill="x", padx=10, pady=(2, 4))
         status_info = ctk.CTkFrame(status_frame, fg_color=COLOR_BG)
         status_info.pack(fill="x", padx=5, pady=2)
         self.status_label = ctk.CTkLabel(status_info, text="✅ 准备就绪", anchor="w",
-                                       font=ctk.CTkFont(weight="bold"), text_color=COLOR_TEXT)
+                                       font=ctk.CTkFont(family=FONT_FAMILY, weight="bold"), text_color=COLOR_TEXT)
         self.status_label.pack(side="left", fill="x", expand=True, padx=5)
-        self.progress_label = ctk.CTkLabel(status_info, text="", anchor="e", font=ctk.CTkFont(size=12), text_color=COLOR_TEXT)
+
+        btn_row = ctk.CTkFrame(status_info, fg_color=COLOR_BG)
+        btn_row.pack(side="right", padx=5)
+        ctk.CTkButton(btn_row, text="清空列表", width=70, height=26, fg_color="#333", hover_color="#555",
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     command=self.clear_file_list).pack(side="left", padx=2)
+        ctk.CTkButton(btn_row, text="保存进度", width=70, height=26, fg_color="#333", hover_color="#555",
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     command=self.save_current_progress).pack(side="left", padx=2)
+
+        self.progress_label = ctk.CTkLabel(status_info, text="", anchor="e", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT)
         self.progress_label.pack(side="right", padx=5)
         self.progress_bar = ctk.CTkProgressBar(status_frame, height=8, fg_color=COLOR_BORDER, progress_color=COLOR_RED)
         self.progress_bar.pack(fill="x", padx=10, pady=(0, 2))
@@ -1532,20 +1658,19 @@ class GarbageCleanupTool:
         count_row = ctk.CTkFrame(status_frame, fg_color=COLOR_BG)
         count_row.pack(fill="x", padx=5, pady=2)
         self.count_label = ctk.CTkLabel(count_row, text="📊 文件: 0 | 总大小: 0 MB", anchor="w",
-                                       text_color=COLOR_TEXT, font=ctk.CTkFont(size=12))
+                                       text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12))
         self.count_label.pack(side="left", padx=5)
         self.selected_size_label = ctk.CTkLabel(count_row, text="☑ 已选: 0 个 | 已选大小: 0 MB", anchor="e",
-                                               text_color=COLOR_RED_LIGHT, font=ctk.CTkFont(size=12, weight="bold"))
+                                               text_color=COLOR_RED_LIGHT, font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"))
         self.selected_size_label.pack(side="right", padx=5)
 
     def _update_selected_size_display(self):
         count = len(self.selected_files)
-        sel_size = 0
-        all_sizes = {fi["path"]: fi["size"] for fi in self.file_list}
-        for fp in self.selected_files:
-            if fp in all_sizes:
-                sel_size += all_sizes[fp]
+        sel_size = self.selected_size
         self.selected_size_label.configure(text=f"☑ 已选: {count} 个 | 已选大小: {round(sel_size / (1024*1024), 2)} MB")
+
+    def _recompute_selected_size(self):
+        self.selected_size = sum(self._file_size_map.get(fp, 0) for fp in self.selected_files)
 
     def browse_directory(self):
         d = filedialog.askdirectory(title="选择要扫描的目录")
@@ -1689,6 +1814,7 @@ class GarbageCleanupTool:
     def _add_file_realtime(self, info):
         self.file_list.append(info)
         self.total_size += info["size"]
+        self._file_size_map[info["path"]] = info["size"]
         self.processed_items += 1
         days = int(self.days_var.get())
         if days > 0:
@@ -1703,6 +1829,13 @@ class GarbageCleanupTool:
         if len(self._pending_ui_updates) >= self._batch_size or (now - self._last_ui_flush > self._flush_interval and self._pending_ui_updates):
             self._last_ui_flush = now
             self._flush_ui_updates()
+        if now - self._last_auto_save_time > self._auto_save_interval:
+            self._last_auto_save_time = now
+            try:
+                scan_dir = self.dir_entry.get().strip()
+                threading.Thread(target=self._auto_save_results_bg, args=(scan_dir,), daemon=True).start()
+            except Exception:
+                pass
 
     def _flush_ui_updates(self):
         if not self._pending_ui_updates:
@@ -1726,6 +1859,7 @@ class GarbageCleanupTool:
                 is_sel = fp in self.selected_files
             if is_sel:
                 self.selected_files.add(fp)
+                self.selected_size += fi["size"]
             tag = self._get_cat_tag(fi["category"])
             tags = (tag, fp) if tag else (fp,)
             self.tree.insert("", "end",
@@ -1738,7 +1872,10 @@ class GarbageCleanupTool:
         tsm = round(self.total_size / (1024*1024), 2)
         self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB" + (f" (显示前{self._max_display}条)" if tf > self._max_display else ""))
         self._update_selected_size_display()
-        self._auto_save_results()
+
+    def _wait_if_paused(self):
+        while self.scan_paused and not self.scan_cancelled:
+            time.sleep(0.1)
 
     def _scan_worker(self, directory):
         if self._scan_depth >= self._max_depth:
@@ -1747,6 +1884,9 @@ class GarbageCleanupTool:
         try:
             subdirs = self._fast_scan_dir(directory)
             for entry in subdirs:
+                if self.scan_cancelled:
+                    return
+                self._wait_if_paused()
                 if self.scan_cancelled:
                     return
                 if self.scan_conditions.get("empty_folders", True):
@@ -1776,6 +1916,7 @@ class GarbageCleanupTool:
         self.file_list.clear()
         self.filtered_files.clear()
         self.selected_files.clear()
+        self.selected_size = 0
         self._pending_ui_updates.clear()
         self.total_size = 0
         self.processed_items = 0
@@ -1786,9 +1927,10 @@ class GarbageCleanupTool:
         self.progress_bar.set(0)
         self.count_label.configure(text="📊 文件: 0 | 总大小: 0 MB")
         self.selected_size_label.configure(text="☑ 已选: 0 个 | 已选大小: 0 MB")
-        self.stop_button.configure(state="normal")
+        self._update_scan_button_state("scanning")
         self.scanning = True
         self.scan_cancelled = False
+        self.scan_paused = False
         self.settings["scan_directory"] = directory
         self.settings["last_scan_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         save_settings(self.settings)
@@ -1805,6 +1947,7 @@ class GarbageCleanupTool:
         self.file_list.clear()
         self.filtered_files.clear()
         self.selected_files.clear()
+        self.selected_size = 0
         self._pending_ui_updates.clear()
         self.total_size = 0
         self.processed_items = 0
@@ -1815,9 +1958,10 @@ class GarbageCleanupTool:
         self.progress_bar.set(0)
         self.count_label.configure(text="📊 文件: 0 | 总大小: 0 MB")
         self.selected_size_label.configure(text="☑ 已选: 0 个 | 已选大小: 0 MB")
-        self.stop_button.configure(state="normal")
+        self._update_scan_button_state("scanning")
         self.scanning = True
         self.scan_cancelled = False
+        self.scan_paused = False
         self.settings["scan_directory"] = directory
         save_settings(self.settings)
         threading.Thread(target=self._run_dup_scan, args=(directory,), daemon=True).start()
@@ -1834,6 +1978,9 @@ class GarbageCleanupTool:
                 try:
                     with os.scandir(d) as it:
                         for entry in it:
+                            if self.scan_cancelled:
+                                return
+                            self._wait_if_paused()
                             if self.scan_cancelled:
                                 return
                             try:
@@ -1873,7 +2020,13 @@ class GarbageCleanupTool:
             for sz, files in size_candidates.items():
                 if self.scan_cancelled:
                     return
+                self._wait_if_paused()
+                if self.scan_cancelled:
+                    return
                 for fi in files:
+                    if self.scan_cancelled:
+                        return
+                    self._wait_if_paused()
                     if self.scan_cancelled:
                         return
                     h = self._head_hash(fi["path"])
@@ -1893,8 +2046,14 @@ class GarbageCleanupTool:
             for key, files in head_candidates.items():
                 if self.scan_cancelled:
                     return
+                self._wait_if_paused()
+                if self.scan_cancelled:
+                    return
                 full_groups = {}
                 for fi in files:
+                    if self.scan_cancelled:
+                        return
+                    self._wait_if_paused()
                     if self.scan_cancelled:
                         return
                     fh = self._full_hash(fi["path"])
@@ -1936,6 +2095,7 @@ class GarbageCleanupTool:
                     self.total_size += fi["size"]
                     if not is_keep:
                         self.selected_files.add(fi["path"])
+                        self.selected_size += fi["size"]
                     tags = (tag_name, fi["path"])
                     self.tree.insert("", "end",
                                    values=("☑" if not is_keep else "☐", fi["name"], fi["path"],
@@ -1960,7 +2120,7 @@ class GarbageCleanupTool:
             self.root.after(0, lambda: self.status_label.configure(text=f"❌ 重复检测出错: {e}"))
         finally:
             self.scanning = False
-            self.root.after(0, lambda: self.stop_button.configure(state="disabled"))
+            self.root.after(0, lambda: self._update_scan_button_state("idle"))
 
     def _show_dup_toolbar(self):
         if self._current_panel_type == "dup_toolbar":
@@ -1973,7 +2133,7 @@ class GarbageCleanupTool:
 
         header = ctk.CTkFrame(panel, fg_color="#252525")
         header.pack(fill="x", padx=10, pady=(6, 2))
-        ctk.CTkLabel(header, text="🔄 重复文件处理", font=ctk.CTkFont(size=13, weight="bold"),
+        ctk.CTkLabel(header, text="🔄 重复文件处理", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
                     text_color=COLOR_TEXT).pack(side="left", padx=(0, 10))
 
         btn_data = [
@@ -1985,10 +2145,10 @@ class GarbageCleanupTool:
         ]
         for text, cmd in btn_data:
             ctk.CTkButton(header, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
-                         text_color=COLOR_TEXT, font=ctk.CTkFont(size=12), command=cmd).pack(side="left", padx=3)
+                         text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=cmd).pack(side="left", padx=3)
 
         ctk.CTkButton(header, text="✕", width=26, height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_DIM, font=ctk.CTkFont(size=12),
+                     text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=self._destroy_current_panel).pack(side="right")
 
     def _dup_keep_newest(self):
@@ -2014,6 +2174,7 @@ class GarbageCleanupTool:
             for fi in group:
                 if fi is not keep:
                     self.selected_files.add(fi["path"])
+        self._recompute_selected_size()
         self._refresh_dup_display()
 
     def _dup_select_all(self):
@@ -2021,10 +2182,12 @@ class GarbageCleanupTool:
         for group in self._dup_groups:
             for fi in group[1:]:
                 self.selected_files.add(fi["path"])
+        self._recompute_selected_size()
         self._refresh_dup_display()
 
     def _dup_deselect_all(self):
         self.selected_files.clear()
+        self.selected_size = 0
         self._refresh_dup_display()
 
     def _refresh_dup_display(self):
@@ -2079,16 +2242,92 @@ class GarbageCleanupTool:
         finally:
             self._flush_ui_updates()
             self.scanning = False
-            self.root.after(0, lambda: self.stop_button.configure(state="disabled"))
+            self.root.after(0, lambda: self._update_scan_button_state("idle"))
             self.root.after(0, lambda: self.progress_bar.set(1.0))
             self._auto_save_results()
 
-    def stop_scan(self):
+    def _update_scan_button_state(self, state):
+        if state == "idle":
+            self.scan_btn.configure(text="🔍 开始扫描", command=self.start_scan)
+            self.scan_btn.pack(side="left", padx=3)
+            self.pause_btn.pack_forget()
+            self.cancel_btn.pack_forget()
+        elif state == "scanning":
+            self.scan_btn.pack_forget()
+            self.pause_btn.configure(text="⏸ 暂停", command=self.pause_scan)
+            self.pause_btn.pack(side="left", padx=3)
+            self.cancel_btn.pack(side="left", padx=3)
+        elif state == "paused":
+            self.scan_btn.pack_forget()
+            self.pause_btn.configure(text="▶ 继续", command=self.resume_scan)
+            self.pause_btn.pack(side="left", padx=3)
+            self.cancel_btn.pack(side="left", padx=3)
+
+    def pause_scan(self):
+        self.scan_paused = True
+        self.status_label.configure(text="⏸ 扫描已暂停")
+        self._update_scan_button_state("paused")
+
+    def resume_scan(self):
+        self.scan_paused = False
+        self.status_label.configure(text="🔍 正在继续扫描...")
+        self._update_scan_button_state("scanning")
+
+    def cancel_scan(self):
         self.scan_cancelled = True
-        self.status_label.configure(text="⏹️ 扫描已停止")
+        self.scan_paused = False
+        self.scanning = False
+        self.file_list = []
+        self.filtered_files = []
+        self.selected_files.clear()
+        self.selected_size = 0
+        self.clear_table()
+        self.count_label.configure(text="📊 文件: 0 | 总大小: 0 MB")
+        self.selected_size_label.configure(text="☑ 已选: 0 个 | 已选大小: 0 MB")
+        self.progress_bar.set(0)
+        self.status_label.configure(text="✅ 已取消扫描")
+        self._update_scan_button_state("idle")
+
+    def clear_file_list(self):
+        if self.scanning:
+            self.scan_cancelled = True
+            self.scanning = False
+        self.file_list = []
+        self.filtered_files = []
+        self.selected_files.clear()
+        self.selected_size = 0
+        self.clear_table()
+        self.count_label.configure(text="📊 文件: 0 | 总大小: 0 MB")
+        self.selected_size_label.configure(text="☑ 已选: 0 个 | 已选大小: 0 MB")
+        self.progress_bar.set(0)
+        self.status_label.configure(text="✅ 列表已清空")
+        self._update_scan_button_state("idle")
+
+    def save_current_progress(self):
+        if not self.file_list:
+            messagebox.showinfo("提示", "当前没有扫描结果可保存")
+            return
+        save_dir = filedialog.askdirectory(title="选择保存目录")
+        if not save_dir:
+            return
+        data = {
+            "scan_time": self.settings.get("last_scan_time", ""),
+            "scan_directory": self.settings.get("scan_directory", ""),
+            "file_list": self.file_list,
+            "category_colors": self.category_colors,
+        }
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = os.path.join(save_dir, f"scan_progress_{ts}.json")
+        try:
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.status_label.configure(text=f"💾 进度已保存到 {os.path.basename(save_path)}")
+        except Exception as e:
+            messagebox.showerror("保存失败", str(e))
 
     def display_files(self):
         self.clear_table()
+        batch = []
         for fi in self.filtered_files:
             fp = fi["path"]
             cat_key = CATEGORY_TO_CHECKBOX.get(fi["category"], "")
@@ -2126,9 +2365,11 @@ class GarbageCleanupTool:
         sa = not self.select_all_var.get()
         self.select_all_var.set(sa)
         self.selected_files.clear()
+        self.selected_size = 0
         if sa:
             for fi in self.filtered_files:
                 self.selected_files.add(fi["path"])
+            self._recompute_selected_size()
         for item in self.tree.get_children():
             fp = self.tree.item(item, "tags")[0]
             self.tree.item(item, values=("☑" if fp in self.selected_files else "☐", *self.tree.item(item, "values")[1:]))
@@ -2138,10 +2379,13 @@ class GarbageCleanupTool:
         item = self.tree.identify_row(event.y)
         if item:
             fp = self.tree.item(item, "tags")[0]
+            fi_size = self._file_size_map.get(fp, 0)
             if fp in self.selected_files:
                 self.selected_files.remove(fp)
+                self.selected_size -= fi_size
             else:
                 self.selected_files.add(fp)
+                self.selected_size += fi_size
             self.tree.item(item, values=("☑" if fp in self.selected_files else "☐", *self.tree.item(item, "values")[1:]))
             self._update_selected_size_display()
 
@@ -2165,7 +2409,7 @@ class GarbageCleanupTool:
 
     def _rebuild_rules_display(self):
         if not hasattr(self, '_rules_display_frame'):
-            self._rules_display_frame = ctk.CTkFrame(self.custom_frame, fg_color="#1e1e1e")
+            self._rules_display_frame = ctk.CTkFrame(self.merged_frame, fg_color="#1e1e1e")
         for w in self._rules_display_frame.winfo_children():
             w.destroy()
         if not self.custom_rules:
@@ -2177,9 +2421,9 @@ class GarbageCleanupTool:
             rf = ctk.CTkFrame(self._rules_display_frame, fg_color=COLOR_BG, border_color=COLOR_BORDER, border_width=1)
             rf.pack(fill="x", padx=2, pady=1)
             ctk.CTkLabel(rf, text=f"{rule['text']} [{labels.get(rule['type'], '')}]",
-                        font=ctk.CTkFont(size=11), text_color=COLOR_TEXT).pack(side="left", padx=5, pady=1)
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=COLOR_TEXT).pack(side="left", padx=5, pady=1)
             ctk.CTkButton(rf, text="✕", width=22, height=20, command=lambda r=rule: self.remove_custom_rule(r),
-                         fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_DIM, font=ctk.CTkFont(size=10)).pack(side="right", padx=3, pady=1)
+                         fg_color="#333", hover_color=COLOR_RED, text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=10)).pack(side="right", padx=3, pady=1)
 
     def remove_custom_rule(self, rule):
         if rule in self.custom_rules:
@@ -2197,32 +2441,41 @@ class GarbageCleanupTool:
             messagebox.showwarning("提示", "没有扫描结果")
             return
         self.status_label.configure(text="✅ 正在校验...")
-        removed = changed = 0
-        valid = []
-        for fi in self.file_list:
-            fp = fi["path"]
-            if not os.path.exists(fp):
-                removed += 1
-                self.selected_files.discard(fp)
-                continue
-            try:
-                st = os.stat(fp)
-                if st.st_size != fi["size"] or st.st_mtime != fi["mtime"]:
-                    fi["size"] = st.st_size
-                    fi["mtime"] = st.st_mtime
-                    changed += 1
-            except Exception:
-                removed += 1
-                self.selected_files.discard(fp)
-                continue
-            valid.append(fi)
-        self.file_list = valid
-        self.filtered_files = valid[:]
-        self.total_size = sum(fi["size"] for fi in valid)
-        self.display_files()
-        self._auto_save_results()
-        self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
-        messagebox.showinfo("校验结果", f"有效: {len(valid)}\n已删除: {removed}\n已变更: {changed}")
+
+        def do_verify():
+            removed = changed = 0
+            valid = []
+            for fi in self.file_list:
+                fp = fi["path"]
+                if not os.path.exists(fp):
+                    removed += 1
+                    self.selected_files.discard(fp)
+                    continue
+                try:
+                    st = os.stat(fp)
+                    if st.st_size != fi["size"] or st.st_mtime != fi["mtime"]:
+                        fi["size"] = st.st_size
+                        fi["mtime"] = st.st_mtime
+                        changed += 1
+                except Exception:
+                    removed += 1
+                    self.selected_files.discard(fp)
+                    continue
+                valid.append(fi)
+
+            def update_ui():
+                self.file_list = valid
+                self.filtered_files = valid[:]
+                self.total_size = sum(fi["size"] for fi in valid)
+                self._file_size_map = {fi["path"]: fi["size"] for fi in valid}
+                self._recompute_selected_size()
+                self.display_files()
+                self._auto_save_results()
+                self.status_label.configure(text=f"✅ 校验完成 | 有效:{len(valid)} 删除:{removed} 变更:{changed}")
+
+            self.root.after(0, update_ui)
+
+        threading.Thread(target=do_verify, daemon=True).start()
 
     def _auto_save(self):
         cat_enabled = {cid: var.get() for cid, var in self.preset_vars.items()}
@@ -2243,6 +2496,21 @@ class GarbageCleanupTool:
         self.settings["scan_directory"] = self.dir_entry.get().strip()
         save_settings(self.settings)
 
+    def _auto_save_results_bg(self, scan_dir):
+        try:
+            data = {
+                "scan_directory": scan_dir,
+                "scan_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "total_size": self.total_size,
+                "selected_files": list(self.selected_files),
+                "file_list": [{"path": fi["path"], "name": fi["name"], "size": fi["size"],
+                              "mtime": fi["mtime"], "type": fi["type"], "category": fi["category"], "desc": fi["desc"]}
+                             for fi in self.file_list],
+            }
+            save_scan_results(data)
+        except Exception:
+            pass
+
     def _auto_save_results(self):
         data = {
             "scan_directory": self.dir_entry.get().strip(),
@@ -2260,18 +2528,36 @@ class GarbageCleanupTool:
         if not data: return
         saved = data.get("file_list", [])
         if not saved: return
-        valid = [fi for fi in saved if os.path.exists(fi.get("path", ""))]
-        if not valid: return
-        self.file_list = valid
-        self.filtered_files = valid[:]
-        self.total_size = data.get("total_size", sum(fi["size"] for fi in valid))
-        self.selected_files = set(data.get("selected_files", [])) & {fi["path"] for fi in valid}
-        sd = data.get("scan_directory", "")
-        if sd:
-            self.dir_entry.delete(0, "end")
-            self.dir_entry.insert(0, sd)
-        self.display_files()
-        self.status_label.configure(text=f"📂 已恢复上次结果 ({data.get('scan_time', '')}) | 点击 ✅校验结果 验证")
+        self.status_label.configure(text="📂 正在恢复上次扫描结果...")
+        self.root.update_idletasks()
+
+        def do_restore():
+            valid = []
+            for fi in saved:
+                fp = fi.get("path", "")
+                if fp and os.path.exists(fp):
+                    valid.append(fi)
+            if not valid:
+                self.root.after(0, lambda: self.status_label.configure(text="📂 上次结果已失效，请重新扫描"))
+                return
+
+            def update_ui():
+                self.file_list = valid
+                self.filtered_files = valid[:]
+                self.total_size = data.get("total_size", sum(fi["size"] for fi in valid))
+                self.selected_files = set(data.get("selected_files", [])) & {fi["path"] for fi in valid}
+                self._file_size_map = {fi["path"]: fi["size"] for fi in valid}
+                self._recompute_selected_size()
+                sd = data.get("scan_directory", "")
+                if sd:
+                    self.dir_entry.delete(0, "end")
+                    self.dir_entry.insert(0, sd)
+                self.display_files()
+                self.status_label.configure(text=f"📂 已恢复上次结果 ({data.get('scan_time', '')})")
+
+            self.root.after(0, update_ui)
+
+        threading.Thread(target=do_restore, daemon=True).start()
 
     def delete_selected_files(self):
         if not self.selected_files:
@@ -2324,6 +2610,7 @@ class GarbageCleanupTool:
             else:
                 fail += len(to_compress)
         self._auto_save_results()
+        self._recompute_selected_size()
         messagebox.showinfo("完成", f"成功: {ok}\n失败: {fail}")
         tf = len(self.filtered_files)
         tsm = round(self.total_size / (1024*1024), 2)
