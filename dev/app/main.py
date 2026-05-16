@@ -575,6 +575,7 @@ class GarbageCleanupTool:
         self._cat_tag_frames = {}
         self._cat_tag_labels = {}
         self._child_checkboxes = {}
+        self._parent_checkboxes = {}
         self._cat_toggle_btns = {}
         self._cat_expanded = False
         self._active_rule_packs = set(self.settings.get("active_rule_packs", ["windows_basic"]))
@@ -686,6 +687,35 @@ class GarbageCleanupTool:
 
         return tag_frame, cb
 
+    def _create_cat_tag_row(self, parent, cat_id, cat_info, var, command,
+                            font_size=12, height=24, parent_color=None):
+        bg_color = parent_color if parent_color else self.category_colors.get(cat_id, COLOR_BG)
+        text_color = CATEGORY_TEXT_COLORS.get(cat_id, COLOR_TEXT) if parent_color else COLOR_TEXT
+
+        tag_frame = ctk.CTkFrame(parent, fg_color=bg_color, corner_radius=4)
+        tag_frame.pack(side="left", padx=(0, 0), pady=0)
+        self._cat_tag_frames[cat_id] = tag_frame
+
+        cb = ctk.CTkCheckBox(tag_frame, text=cat_info["name"], variable=var, command=command,
+                            fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                            checkmark_color=text_color, text_color=text_color,
+                            font=ctk.CTkFont(family=FONT_FAMILY, size=font_size), corner_radius=4,
+                            bg_color=bg_color, border_width=0, height=height)
+        cb.pack(side="left", padx=4, pady=(2 if height >= 24 else 1))
+
+        tooltip_text = cat_info.get("tooltip", "")
+        if tooltip_text:
+            ToolTip(cb, tooltip_text)
+            ToolTip(tag_frame, tooltip_text)
+
+        color_btn = ctk.CTkButton(parent, text="调色", width=28, height=height, fg_color="#444", hover_color="#555",
+                                 text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+                                 command=lambda cid=cat_id: self._pick_color_inline(cid))
+        color_btn.pack(side="left", padx=(2, 0))
+        self._cat_color_btns[cat_id] = color_btn
+
+        return tag_frame, cb, color_btn
+
     def setup_control_panel(self):
         control_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
         control_frame.pack(fill="x", padx=10, pady=(10, 5))
@@ -751,6 +781,7 @@ class GarbageCleanupTool:
         self._cat_color_btns = {}
         self._cat_tag_frames = {}
         self._child_checkboxes = {}
+        self._parent_checkboxes = {}
         self._cat_expanded = False
         self._cat_col_map = {}
         self._cat_cell_frames = {}
@@ -765,35 +796,14 @@ class GarbageCleanupTool:
             has_children = "children" in cat_info
             cmd = (lambda cid=cat_id: self.on_parent_toggle(cid)) if has_children else self.on_category_toggle
 
-            color = self.category_colors.get(cat_id, COLOR_BG)
-
             cell_frame = ctk.CTkFrame(self._cat_grid, fg_color="#1e1e1e")
-            cell_frame.grid(row=0, column=col_idx, padx=2, pady=2, sticky="nw")
+            cell_frame.grid(row=0, column=col_idx, padx=7, pady=2, sticky="nw")
 
             primary_row = ctk.CTkFrame(cell_frame, fg_color="#1e1e1e")
             primary_row.pack(fill="x")
 
-            tag_frame = ctk.CTkFrame(primary_row, fg_color=color, corner_radius=4)
-            tag_frame.pack(side="left", padx=(0, 0), pady=0)
-            self._cat_tag_frames[cat_id] = tag_frame
-
-            cb = ctk.CTkCheckBox(tag_frame, text=cat_info["name"], variable=var, command=cmd,
-                                fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                                checkmark_color=COLOR_TEXT, text_color=COLOR_TEXT,
-                                font=ctk.CTkFont(family=FONT_FAMILY, size=12), corner_radius=4,
-                                bg_color=color, border_width=0, height=24)
-            cb.pack(side="left", padx=4, pady=2)
-
-            tooltip_text = cat_info.get("tooltip", "")
-            if tooltip_text:
-                ToolTip(cb, tooltip_text)
-                ToolTip(tag_frame, tooltip_text)
-
-            color_btn = ctk.CTkButton(primary_row, text="调色", width=28, height=24, fg_color="#444", hover_color="#555",
-                                     text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=9),
-                                     command=lambda cid=cat_id: self._pick_color_inline(cid))
-            color_btn.pack(side="left", padx=(2, 0))
-            self._cat_color_btns[cat_id] = color_btn
+            _, parent_cb, _ = self._create_cat_tag_row(primary_row, cat_id, cat_info, var, cmd)
+            self._parent_checkboxes[cat_id] = parent_cb
 
             self._cat_col_map[cat_id] = col_idx
             self._cat_cell_frames[cat_id] = cell_frame
@@ -922,10 +932,15 @@ class GarbageCleanupTool:
             children = cat_info.get("children", [])
             if not children:
                 continue
-            color = self.category_colors.get(cat_id, COLOR_BG)
 
-            dropdown = ctk.CTkFrame(cell_frame, fg_color=color, corner_radius=4)
-            dropdown.pack(fill="x", pady=(2, 0))
+            col_idx = self._cat_col_map.get(cat_id)
+            if col_idx is None:
+                continue
+
+            dropdown = ctk.CTkFrame(self._cat_grid, fg_color="#1e1e1e", corner_radius=4)
+            dropdown.grid(row=1, column=col_idx, padx=2, pady=(2, 2), sticky="new")
+
+            parent_bg = self.category_colors.get(cat_id, COLOR_BG)
 
             for child_id in children:
                 child_info_d = CATEGORY_TREE.get(child_id, {})
@@ -934,38 +949,34 @@ class GarbageCleanupTool:
                     child_var = ctk.BooleanVar(value=default_val_c)
                     self.preset_vars[child_id] = child_var
 
-                child_row = ctk.CTkFrame(dropdown, fg_color=color)
+                child_row = ctk.CTkFrame(dropdown, fg_color="#1e1e1e")
                 child_row.pack(fill="x", padx=4, pady=1)
 
-                child_text_color = CATEGORY_TEXT_COLORS.get(child_id, COLOR_TEXT)
-                child_cb = ctk.CTkCheckBox(child_row, text=child_info_d["name"], variable=self.preset_vars[child_id],
-                                          command=lambda cid=child_id: self.on_child_toggle(cid),
-                                          fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                                          checkmark_color=child_text_color, text_color=child_text_color,
-                                          font=ctk.CTkFont(family=FONT_FAMILY, size=11), corner_radius=4,
-                                          bg_color=color, border_width=0)
-                child_cb.pack(side="left", padx=2, pady=1)
+                _, child_cb, _ = self._create_cat_tag_row(
+                    child_row, child_id, child_info_d, self.preset_vars[child_id],
+                    lambda cid=child_id: self.on_child_toggle(cid),
+                    font_size=11, height=22, parent_color=parent_bg)
                 self._child_checkboxes[child_id] = child_cb
-
-                tooltip_text = child_info_d.get("tooltip", "")
-                if tooltip_text:
-                    ToolTip(child_cb, tooltip_text)
-
-                child_color_btn = ctk.CTkButton(child_row, text="调色", width=28, height=18, fg_color="#444",
-                                              hover_color="#555", text_color=COLOR_DIM, font=ctk.CTkFont(family=FONT_FAMILY, size=9),
-                                              command=lambda cid=child_id: self._pick_color_inline(cid))
-                child_color_btn.pack(side="left", padx=(2, 0))
-                self._cat_color_btns[child_id] = child_color_btn
 
             self._cat_dropdowns[cat_id] = dropdown
 
     def _pick_color_inline(self, cat_id):
-        current = self.category_colors.get(cat_id, COLOR_BG)
-        result = colorchooser.askcolor(color=current, title="选择颜色")
-        if result and result[1]:
-            self.category_colors[cat_id] = result[1]
-            self._update_tag_styles()
-            self._auto_save()
+        cat_info = CATEGORY_TREE.get(cat_id, {})
+        is_child = "parent" in cat_info
+        if is_child:
+            current = CATEGORY_TEXT_COLORS.get(cat_id, COLOR_TEXT)
+            result = colorchooser.askcolor(color=current, title="选择文字颜色")
+            if result and result[1]:
+                CATEGORY_TEXT_COLORS[cat_id] = result[1]
+                self._update_tag_styles()
+                self._auto_save()
+        else:
+            current = self.category_colors.get(cat_id, COLOR_BG)
+            result = colorchooser.askcolor(color=current, title="选择背景颜色")
+            if result and result[1]:
+                self.category_colors[cat_id] = result[1]
+                self._update_tag_styles()
+                self._auto_save()
 
     def _update_tag_styles(self):
         for cat_id, color in self.category_colors.items():
@@ -975,9 +986,18 @@ class GarbageCleanupTool:
             tag_frame = self._cat_tag_frames.get(cat_id)
             if tag_frame:
                 tag_frame.configure(fg_color=color)
+            parent_cb = self._parent_checkboxes.get(cat_id)
+            if parent_cb:
+                parent_cb.configure(bg_color=color)
         for child_id, child_cb in self._child_checkboxes.items():
+            child_info = CATEGORY_TREE.get(child_id, {})
+            parent_id = child_info.get("parent")
+            parent_bg = self.category_colors.get(parent_id, COLOR_BG) if parent_id else COLOR_BG
             text_color = CATEGORY_TEXT_COLORS.get(child_id, COLOR_TEXT)
-            child_cb.configure(text_color=text_color, checkmark_color=text_color)
+            child_cb.configure(text_color=text_color, checkmark_color=text_color, bg_color=parent_bg)
+            child_tag_frame = self._cat_tag_frames.get(child_id)
+            if child_tag_frame:
+                child_tag_frame.configure(fg_color=parent_bg)
         self._auto_save()
 
     def on_child_toggle(self, child_id):
