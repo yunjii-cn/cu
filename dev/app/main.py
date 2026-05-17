@@ -1392,38 +1392,34 @@ class GarbageCleanupTool:
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=self._check_remote_versions).pack(side="right", padx=5, pady=6)
 
-        scroll = ctk.CTkScrollableFrame(page, fg_color=COLOR_BG, corner_radius=0)
-        scroll.pack(fill="both", expand=True, padx=0, pady=0)
+        tab_bar = ctk.CTkFrame(page, fg_color="#1e1e1e", corner_radius=0, height=40)
+        tab_bar.pack(fill="x", padx=0, pady=0)
+        tab_bar.pack_propagate(False)
 
-        self._ver_info_frame = ctk.CTkFrame(scroll, fg_color="#1e1e1e", corner_radius=6)
-        self._ver_info_frame.pack(fill="x", padx=10, pady=(6, 2))
-        self._ver_info_label = ctk.CTkLabel(self._ver_info_frame, text="点击「检查远程更新」查看最新版本",
-                                            font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_DIM,
-                                            wraplength=600, justify="left")
-        self._ver_info_label.pack(padx=12, pady=8, anchor="w")
+        self._ver_tab_stable_btn = ctk.CTkButton(
+            tab_bar, text="📦 EXE稳定版", width=140, height=30,
+            fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+            text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            corner_radius=4,
+            command=lambda: self._switch_ver_tab("stable"))
+        self._ver_tab_stable_btn.pack(side="left", padx=(10, 4), pady=5)
 
-        sep1 = ctk.CTkFrame(scroll, fg_color="#333", height=1)
-        sep1.pack(fill="x", padx=10, pady=(4, 2))
+        self._ver_tab_git_btn = ctk.CTkButton(
+            tab_bar, text="🔀 Git开发版", width=140, height=30,
+            fg_color="#2a2a2a", hover_color=COLOR_RED,
+            text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            corner_radius=4,
+            command=lambda: self._switch_ver_tab("git"))
+        self._ver_tab_git_btn.pack(side="left", padx=4, pady=5)
 
-        ctk.CTkLabel(scroll, text="📦 稳定版本", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
-                    text_color=COLOR_RED).pack(anchor="w", padx=14, pady=(6, 2))
+        self._ver_scroll = ctk.CTkScrollableFrame(page, fg_color=COLOR_BG, corner_radius=0)
+        self._ver_scroll.pack(fill="both", expand=True, padx=0, pady=0)
 
-        self._ver_stable_container = ctk.CTkFrame(scroll, fg_color=COLOR_BG)
-        self._ver_stable_container.pack(fill="x", padx=10, pady=2)
-
-        sep2 = ctk.CTkFrame(scroll, fg_color="#333", height=1)
-        sep2.pack(fill="x", padx=10, pady=(8, 2))
-
-        git_header = ctk.CTkFrame(scroll, fg_color=COLOR_BG)
-        git_header.pack(fill="x", padx=10, pady=(4, 2))
-        ctk.CTkLabel(git_header, text="🔀 Git 版本切换", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
-                    text_color="#42A5F5").pack(side="left", padx=4)
-        ctk.CTkButton(git_header, text="刷新历史", width=70, height=24, fg_color="#2a2a2a", hover_color="#3a3a3a",
-                     text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
-                     command=self._refresh_git_history).pack(side="right", padx=4)
-
-        self._ver_git_container = ctk.CTkFrame(scroll, fg_color=COLOR_BG)
-        self._ver_git_container.pack(fill="x", padx=10, pady=2)
+        self._ver_stable_data = []
+        self._ver_git_data = []
+        self._ver_current_version = VERSION
+        self._ver_active_tab = "stable"
+        self._ver_info_text = "点击「检查远程更新」查看最新版本"
 
         self._ver_status_label.configure(text="加载中...")
         self.root.after(100, self._load_all_versions)
@@ -1433,12 +1429,74 @@ class GarbageCleanupTool:
         for w in self.main_frame.winfo_children():
             w.destroy()
         self._current_panel = None
+        self._ver_scroll = None
         self._ver_info_frame = None
         self._ver_info_label = None
         self._ver_stable_container = None
         self._ver_git_container = None
         self._ver_status_label = None
+        self._ver_tab_stable_btn = None
+        self._ver_tab_git_btn = None
+        self._ver_stable_data = []
+        self._ver_git_data = []
+        self._ver_active_tab = "stable"
+        self._ver_info_text = ""
         self._restore_main_ui()
+
+    def _switch_ver_tab(self, tab):
+        if tab == self._ver_active_tab:
+            return
+        self._ver_active_tab = tab
+        if tab == "stable":
+            self._ver_tab_stable_btn.configure(fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                                                text_color=COLOR_TEXT,
+                                                font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"))
+            self._ver_tab_git_btn.configure(fg_color="#2a2a2a", hover_color=COLOR_RED,
+                                             text_color="#aaa",
+                                             font=ctk.CTkFont(family=FONT_FAMILY, size=12))
+        else:
+            self._ver_tab_git_btn.configure(fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                                             text_color=COLOR_TEXT,
+                                             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"))
+            self._ver_tab_stable_btn.configure(fg_color="#2a2a2a", hover_color=COLOR_RED,
+                                                text_color="#aaa",
+                                                font=ctk.CTkFont(family=FONT_FAMILY, size=12))
+        self._render_active_tab()
+
+    def _render_active_tab(self):
+        if self._ver_scroll is None or not self._ver_scroll.winfo_exists():
+            return
+        for w in self._ver_scroll.winfo_children():
+            w.destroy()
+        if self._ver_active_tab == "stable":
+            self._render_stable_tab()
+        else:
+            self._render_git_tab()
+
+    def _render_stable_tab(self):
+        self._ver_info_frame = ctk.CTkFrame(self._ver_scroll, fg_color="#1e1e1e", corner_radius=6)
+        self._ver_info_frame.pack(fill="x", padx=10, pady=(6, 2))
+        self._ver_info_label = ctk.CTkLabel(self._ver_info_frame, text=self._ver_info_text,
+                                            font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_DIM,
+                                            wraplength=600, justify="left")
+        self._ver_info_label.pack(padx=12, pady=8, anchor="w")
+
+        self._ver_stable_container = ctk.CTkFrame(self._ver_scroll, fg_color=COLOR_BG)
+        self._ver_stable_container.pack(fill="x", padx=10, pady=2)
+        self._render_stable_versions(self._ver_stable_data, self._ver_current_version)
+
+    def _render_git_tab(self):
+        git_header = ctk.CTkFrame(self._ver_scroll, fg_color=COLOR_BG)
+        git_header.pack(fill="x", padx=10, pady=(6, 2))
+        ctk.CTkLabel(git_header, text="🔀 Git 版本切换", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                    text_color="#42A5F5").pack(side="left", padx=4)
+        ctk.CTkButton(git_header, text="刷新历史", width=70, height=24, fg_color="#2a2a2a", hover_color="#3a3a3a",
+                     text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     command=self._refresh_git_history).pack(side="right", padx=4)
+
+        self._ver_git_container = ctk.CTkFrame(self._ver_scroll, fg_color=COLOR_BG)
+        self._ver_git_container.pack(fill="x", padx=10, pady=2)
+        self._render_git_history(self._ver_git_data)
 
     def _restore_main_ui(self):
         self.setup_status_bar()
@@ -1577,16 +1635,18 @@ class GarbageCleanupTool:
         all_versions.sort(key=lambda x: x["version"], reverse=True)
 
         def update_ui():
-            if self._ver_stable_container is not None and self._ver_stable_container.winfo_exists():
-                self._render_stable_versions(all_versions, current_version)
-            if self._ver_git_container is not None and self._ver_git_container.winfo_exists():
-                self._render_git_history(git_commits)
+            self._ver_stable_data = all_versions
+            self._ver_git_data = git_commits
+            self._ver_current_version = current_version
+            self._render_active_tab()
             if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
                 self._ver_status_label.configure(text=f"稳定版 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
 
         self.root.after(0, update_ui)
 
     def _render_stable_versions(self, all_versions, current_version):
+        if self._ver_stable_container is None or not self._ver_stable_container.winfo_exists():
+            return
         for w in self._ver_stable_container.winfo_children():
             w.destroy()
 
@@ -1604,8 +1664,8 @@ class GarbageCleanupTool:
             exe_info = v.get("exe_info")
 
             if is_current:
-                card_bg = "#162016"
-                border_color = "#1f3a1f"
+                card_bg = "#151525"
+                border_color = "#1f2a4f"
             elif is_remote_new:
                 card_bg = "#161620"
                 border_color = "#1f3a4f"
@@ -1623,7 +1683,7 @@ class GarbageCleanupTool:
             header = ctk.CTkFrame(card, fg_color=card_bg)
             header.pack(fill="x", padx=10, pady=(6, 2))
 
-            ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else (COLOR_TEXT if is_available else COLOR_DIM))
+            ver_color = "#5DADE2" if is_current else ("#42A5F5" if is_remote_new else (COLOR_TEXT if is_available else COLOR_DIM))
             ctk.CTkLabel(header, text=f"v{ver}", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
                         text_color=ver_color).pack(side="left")
 
@@ -1644,7 +1704,7 @@ class GarbageCleanupTool:
 
             if is_current:
                 ctk.CTkLabel(header, text="● 当前版本", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                            text_color="#4CAF50").pack(side="right", padx=4)
+                            text_color="#5DADE2").pack(side="right", padx=4)
             elif is_available and exe_info:
                 ctk.CTkButton(header, text="切换", width=50, height=22, fg_color="#1e1e1e", hover_color="#2a2a2a",
                              text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
@@ -1670,6 +1730,8 @@ class GarbageCleanupTool:
                             text_color="#3a3a3a").pack(anchor="w")
 
     def _render_git_history(self, git_commits):
+        if self._ver_git_container is None or not self._ver_git_container.winfo_exists():
+            return
         for w in self._ver_git_container.winfo_children():
             w.destroy()
 
@@ -1689,8 +1751,8 @@ class GarbageCleanupTool:
             is_current = (commit["hash"] == current_commit)
 
             if is_current:
-                card_bg = "#162016"
-                border_color = "#1f3a1f"
+                card_bg = "#151525"
+                border_color = "#1f2a4f"
             else:
                 card_bg = "#161616"
                 border_color = "#2a2a2a"
@@ -1702,7 +1764,7 @@ class GarbageCleanupTool:
             header = ctk.CTkFrame(card, fg_color=card_bg)
             header.pack(fill="x", padx=10, pady=(6, 2))
 
-            hash_color = "#4CAF50" if is_current else "#42A5F5"
+            hash_color = "#5DADE2" if is_current else "#42A5F5"
             ctk.CTkLabel(header, text=commit["hash"], font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
                         text_color=hash_color).pack(side="left")
 
@@ -1711,7 +1773,7 @@ class GarbageCleanupTool:
 
             if is_current:
                 ctk.CTkLabel(header, text="● 当前", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                            text_color="#4CAF50").pack(side="right", padx=4)
+                            text_color="#5DADE2").pack(side="right", padx=4)
             else:
                 ctk.CTkButton(header, text="切换", width=50, height=22, fg_color="#1e1e1e", hover_color="#2a2a2a",
                              text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
@@ -1725,10 +1787,10 @@ class GarbageCleanupTool:
                         text_color="#666").pack(anchor="w")
 
     def _refresh_git_history(self):
-        if self._ver_git_container is None or not self._ver_git_container.winfo_exists():
-            return
         git_commits = self._get_git_history(30)
-        self._render_git_history(git_commits)
+        self._ver_git_data = git_commits
+        if self._ver_active_tab == "git":
+            self._render_active_tab()
 
     def _check_remote_versions(self):
         if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
@@ -1819,16 +1881,15 @@ class GarbageCleanupTool:
             all_versions.sort(key=lambda x: x["version"], reverse=True)
 
             def update_ui():
-                if self._ver_stable_container is not None and self._ver_stable_container.winfo_exists():
-                    self._render_stable_versions(all_versions, current_version)
-                if self._ver_git_container is not None and self._ver_git_container.winfo_exists():
-                    self._render_git_history(git_commits)
-                if self._ver_info_label is not None and self._ver_info_label.winfo_exists():
-                    has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
-                    if has_update:
-                        self._ver_info_label.configure(text=f"🆕 发现新版本 v{remote_latest}")
-                    else:
-                        self._ver_info_label.configure(text="✅ 已是最新版本")
+                self._ver_stable_data = all_versions
+                self._ver_git_data = git_commits
+                self._ver_current_version = current_version
+                has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
+                if has_update:
+                    self._ver_info_text = f"🆕 发现新版本 v{remote_latest}"
+                else:
+                    self._ver_info_text = "✅ 已是最新版本"
+                self._render_active_tab()
                 if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
                     self._ver_status_label.configure(text=f"稳定版 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
 
