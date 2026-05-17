@@ -40,7 +40,7 @@ except Exception:
     pass
 
 VERSION = "DEV"
-VERSION_CHECK_URL = "https://gitee.com/yunjii/cu/raw/main/dev/ver/version.json"
+VERSION_CHECK_URL = ""
 APP_NAME = f"云集智能文件清理专家 v{VERSION}"
 
 COLOR_RED = "#CC0000"
@@ -663,8 +663,8 @@ class GarbageCleanupTool:
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.setup_status_bar()
-        self.setup_control_panel()
         self.setup_scan_conditions()
+        self.setup_control_panel()
         self.setup_table_area()
 
     def _make_color_tag(self, parent, text, cat_id, variable, command, font_size=12):
@@ -717,7 +717,7 @@ class GarbageCleanupTool:
 
     def setup_control_panel(self):
         control_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
-        control_frame.pack(fill="x", padx=10, pady=(10, 5))
+        control_frame.pack(fill="x", padx=10, pady=(5, 2))
 
         ctk.CTkLabel(control_frame, text="📁", font=ctk.CTkFont(family=FONT_FAMILY, size=16)).pack(side="left", padx=(10, 3))
 
@@ -747,7 +747,7 @@ class GarbageCleanupTool:
         saved_enabled = self.settings.get("category_enabled", {})
 
         self._func_frame = ctk.CTkFrame(self.main_frame, fg_color="#1e1e1e", border_color=COLOR_BORDER, border_width=1)
-        self._func_frame.pack(fill="x", padx=10, pady=(5, 2))
+        self._func_frame.pack(fill="x", padx=10, pady=(10, 2))
 
         func_row = ctk.CTkFrame(self._func_frame, fg_color="#1e1e1e")
         func_row.pack(fill="x", padx=8, pady=6)
@@ -760,6 +760,7 @@ class GarbageCleanupTool:
             ("⚙ 扫描设置", self.toggle_settings_panel),
             ("🗑 删除设置", self.toggle_delete_settings_panel),
             ("📊 分析报告", self.toggle_analysis_report),
+            ("🔄 软件更新", self.toggle_version_panel),
         ]
         for text, cmd in func_buttons:
             ctk.CTkButton(func_row, text=text, height=26, fg_color="#333", hover_color=COLOR_RED,
@@ -932,14 +933,10 @@ class GarbageCleanupTool:
             if not children:
                 continue
 
-            col_idx = self._cat_col_map.get(cat_id)
-            if col_idx is None:
-                continue
-
-            dropdown = ctk.CTkFrame(self._cat_grid, fg_color="#1e1e1e", corner_radius=0)
-            dropdown.grid(row=1, column=col_idx, padx=7, pady=(0, 2), sticky="new")
-
             parent_bg = self.category_colors.get(cat_id, COLOR_BG)
+
+            dropdown = ctk.CTkFrame(cell_frame, fg_color="#1e1e1e", corner_radius=0)
+            dropdown.pack(fill="x", pady=(2, 0))
 
             for child_id in children:
                 child_info_d = CATEGORY_TREE.get(child_id, {})
@@ -1104,6 +1101,7 @@ class GarbageCleanupTool:
             for key, _, _, default in items:
                 entries[key].delete(0, "end")
                 entries[key].insert(0, default)
+            save_inline()
 
         def save_inline():
             try:
@@ -1114,14 +1112,15 @@ class GarbageCleanupTool:
                 self.settings.update({"max_display": self._max_display, "max_depth": self._max_depth,
                                      "batch_size": self._batch_size, "flush_interval": self._flush_interval})
                 save_settings(self.settings)
-                self._destroy_current_panel()
             except ValueError:
-                messagebox.showerror("输入错误", "请输入有效的数值")
+                pass
+
+        for key in entries:
+            entries[key].bind("<Return>", lambda e: save_inline())
+            entries[key].bind("<FocusOut>", lambda e: save_inline())
 
         ctk.CTkButton(btn_row, text="应用推荐值", height=26, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=apply_rec).pack(side="left", padx=(0, 5))
-        ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=save_inline).pack(side="left", padx=5)
 
     def toggle_delete_settings_panel(self):
         if self._current_panel_type == "delete":
@@ -1174,10 +1173,12 @@ class GarbageCleanupTool:
             self.settings.update({"delete_mode": self.delete_mode, "delete_move_dir": self.delete_move_dir,
                                  "delete_zip_name": self.delete_zip_name})
             save_settings(self.settings)
-            self._destroy_current_panel()
 
-        ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=save_del).pack(side="left", padx=5)
+        del_mode_var.trace_add("write", lambda *a: save_del())
+        move_dir_entry.bind("<FocusOut>", lambda e: save_del())
+        zip_name_entry.bind("<FocusOut>", lambda e: save_del())
+        move_dir_entry.bind("<Return>", lambda e: save_del())
+        zip_name_entry.bind("<Return>", lambda e: save_del())
 
     def toggle_preset_rules_panel(self):
         if self._current_panel_type == "preset":
@@ -1226,7 +1227,9 @@ class GarbageCleanupTool:
             self.settings["active_rule_packs"] = list(self._active_rule_packs)
             self._apply_rule_packs()
             save_settings(self.settings)
-            self._destroy_current_panel()
+
+        for rid, v in rule_check_vars.items():
+            v.trace_add("write", lambda *a, rid=rid: save_rules())
 
         ctk.CTkButton(btn_row, text="全选", height=26, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
@@ -1234,8 +1237,6 @@ class GarbageCleanupTool:
         ctk.CTkButton(btn_row, text="全不选", height=26, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=lambda: [v.set(False) for v in rule_check_vars.values()]).pack(side="left", padx=(0, 5))
-        ctk.CTkButton(btn_row, text="保存", height=26, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=save_rules).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="📁 导入规则", height=26, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=self._import_custom_rule_pack).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="📤 导出规则", height=26, fg_color="#333", hover_color=COLOR_RED,
@@ -1357,6 +1358,544 @@ class GarbageCleanupTool:
         self._report_stats_label.configure(text="正在校验文件...")
         self._report_advice_label.configure(text="请稍候...")
         threading.Thread(target=self._do_verify_and_build_report_bg, daemon=True).start()
+
+    def toggle_version_panel(self):
+        if self._current_panel_type == "version":
+            self._close_version_page()
+            return
+        self._destroy_current_panel()
+        self._show_version_page()
+
+    def _show_version_page(self):
+        self._current_panel_type = "version"
+        for w in self.main_frame.winfo_children():
+            if w != self.status_frame:
+                w.destroy()
+
+        page = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG)
+        page.pack(fill="both", expand=True, padx=0, pady=0, before=self.status_frame)
+        self._current_panel = page
+
+        top_bar = ctk.CTkFrame(page, fg_color="#1e1e1e", corner_radius=0)
+        top_bar.pack(fill="x", padx=0, pady=0)
+        ctk.CTkButton(top_bar, text="← 返回扫描", width=90, height=30, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                     command=self._close_version_page).pack(side="left", padx=10, pady=8)
+        ctk.CTkLabel(top_bar, text="🔄 软件更新与版本管理", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left", padx=5)
+        ctk.CTkLabel(top_bar, text=f"v{VERSION}", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                    text_color=COLOR_DIM).pack(side="left", padx=10)
+        self._ver_status_label = ctk.CTkLabel(top_bar, text="", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                                              text_color=COLOR_DIM)
+        self._ver_status_label.pack(side="right", padx=10)
+        ctk.CTkButton(top_bar, text="🔄 检查远程更新", height=28, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                     command=self._check_remote_versions).pack(side="right", padx=5, pady=6)
+
+        scroll = ctk.CTkScrollableFrame(page, fg_color=COLOR_BG, corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=0, pady=0)
+
+        self._ver_info_frame = ctk.CTkFrame(scroll, fg_color="#1e1e1e", corner_radius=6)
+        self._ver_info_frame.pack(fill="x", padx=10, pady=(6, 2))
+        self._ver_info_label = ctk.CTkLabel(self._ver_info_frame, text="点击「检查远程更新」查看最新版本",
+                                            font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_DIM,
+                                            wraplength=600, justify="left")
+        self._ver_info_label.pack(padx=12, pady=8, anchor="w")
+
+        sep1 = ctk.CTkFrame(scroll, fg_color="#333", height=1)
+        sep1.pack(fill="x", padx=10, pady=(4, 2))
+
+        ctk.CTkLabel(scroll, text="📦 稳定版本", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                    text_color=COLOR_RED).pack(anchor="w", padx=14, pady=(6, 2))
+
+        self._ver_stable_container = ctk.CTkFrame(scroll, fg_color=COLOR_BG)
+        self._ver_stable_container.pack(fill="x", padx=10, pady=2)
+
+        sep2 = ctk.CTkFrame(scroll, fg_color="#333", height=1)
+        sep2.pack(fill="x", padx=10, pady=(8, 2))
+
+        git_header = ctk.CTkFrame(scroll, fg_color=COLOR_BG)
+        git_header.pack(fill="x", padx=10, pady=(4, 2))
+        ctk.CTkLabel(git_header, text="🔀 Git 版本切换", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                    text_color="#42A5F5").pack(side="left", padx=4)
+        ctk.CTkButton(git_header, text="刷新历史", width=70, height=24, fg_color="#2a2a2a", hover_color="#3a3a3a",
+                     text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     command=self._refresh_git_history).pack(side="right", padx=4)
+
+        self._ver_git_container = ctk.CTkFrame(scroll, fg_color=COLOR_BG)
+        self._ver_git_container.pack(fill="x", padx=10, pady=2)
+
+        self._ver_status_label.configure(text="加载中...")
+        self.root.after(100, self._load_all_versions)
+
+    def _close_version_page(self):
+        self._current_panel_type = None
+        for w in self.main_frame.winfo_children():
+            w.destroy()
+        self._current_panel = None
+        self._ver_info_frame = None
+        self._ver_info_label = None
+        self._ver_stable_container = None
+        self._ver_git_container = None
+        self._ver_status_label = None
+        self._restore_main_ui()
+
+    def _restore_main_ui(self):
+        self.setup_status_bar()
+        self.setup_scan_conditions()
+        self.setup_control_panel()
+        self.setup_table_area()
+        if self.file_list:
+            self.update_scan_conditions()
+            self.display_files()
+
+    def _get_project_root(self):
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(os.path.dirname(sys.executable))
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    def _get_dev_dir(self):
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _run_git(self, *args, cwd=None, timeout=60):
+        import subprocess
+        cmd = ["git"] + list(args)
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            r = subprocess.run(cmd, cwd=cwd or self._get_project_root(),
+                              capture_output=True, text=True, timeout=timeout,
+                              startupinfo=si,
+                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            return {"ok": r.returncode == 0, "stdout": r.stdout.strip(), "stderr": r.stderr.strip()}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "stdout": "", "stderr": "命令超时"}
+        except Exception as e:
+            return {"ok": False, "stdout": "", "stderr": str(e)}
+
+    def _is_git_repo(self):
+        r = self._run_git("rev-parse", "--is-inside-work-tree")
+        return r["ok"] and r["stdout"] == "true"
+
+    def _get_current_commit(self):
+        r = self._run_git("rev-parse", "--short", "HEAD")
+        return r["stdout"] if r["ok"] else "unknown"
+
+    def _list_stable_exes(self):
+        dev_dir = self._get_dev_dir()
+        ver_dir = os.path.join(dev_dir, "ver")
+        if not os.path.isdir(ver_dir):
+            return []
+        import re
+        exes = []
+        for f in os.listdir(ver_dir):
+            if f.endswith(".exe") and "云集智能文件清理专家" in f:
+                path = os.path.join(ver_dir, f)
+                m = re.search(r'v(\d+\.\d+\.\d+\.\d+)', f)
+                ver = m.group(1) if m else "unknown"
+                size_mb = round(os.path.getsize(path) / (1024 * 1024), 1)
+                exes.append({"filename": f, "path": path, "version": ver, "size_mb": size_mb})
+        exes.sort(key=lambda x: x["version"], reverse=True)
+        return exes
+
+    def _get_local_version_history(self):
+        dev_dir = self._get_dev_dir()
+        path = os.path.join(dev_dir, "app", "version_history.json")
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+            return []
+        except Exception:
+            return []
+
+    def _get_git_history(self, limit=30):
+        if not self._is_git_repo():
+            return []
+        r = self._run_git("log", f"-{limit}", "--oneline", "--format=%h|%s|%an|%ar", timeout=30)
+        if not r["ok"]:
+            return []
+        commits = []
+        for line in r["stdout"].splitlines():
+            parts = line.strip().split("|", 3)
+            if len(parts) >= 4:
+                commits.append({"hash": parts[0], "message": parts[1], "author": parts[2], "time": parts[3]})
+        return commits
+
+    def _load_all_versions(self):
+        if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
+            self._ver_status_label.configure(text="正在加载版本信息...")
+        threading.Thread(target=self._do_load_all_versions, daemon=True).start()
+
+    def _do_load_all_versions(self):
+        stable_exes = self._list_stable_exes()
+        exe_versions = {e["version"]: e for e in stable_exes}
+        local_versions = self._get_local_version_history()
+        git_commits = self._get_git_history(30)
+
+        current_version = VERSION
+
+        local_ver_set = set()
+        all_versions = []
+        import re
+        for v in local_versions:
+            ver = v.get("version", "")
+            m = re.search(r'v?(\d+\.\d+\.\d+\.\d+)', ver)
+            ver_num = m.group(1) if m else ver
+            if not ver_num:
+                continue
+            local_ver_set.add(ver_num)
+            all_versions.append({
+                "version": ver_num,
+                "name": v.get("name", f"v{ver_num}"),
+                "changes": v.get("changes", []),
+                "build_time": v.get("build_time", v.get("date", "")),
+                "git_commit": v.get("git_commit", ""),
+                "available": ver_num in exe_versions,
+                "exe_info": exe_versions.get(ver_num),
+                "is_remote_new": False,
+            })
+
+        for ver, exe in exe_versions.items():
+            if ver not in local_ver_set:
+                all_versions.append({
+                    "version": ver,
+                    "name": exe["filename"],
+                    "changes": [],
+                    "build_time": "",
+                    "git_commit": "",
+                    "available": True,
+                    "exe_info": exe,
+                    "is_remote_new": False,
+                })
+
+        all_versions.sort(key=lambda x: x["version"], reverse=True)
+
+        def update_ui():
+            if self._ver_stable_container is not None and self._ver_stable_container.winfo_exists():
+                self._render_stable_versions(all_versions, current_version)
+            if self._ver_git_container is not None and self._ver_git_container.winfo_exists():
+                self._render_git_history(git_commits)
+            if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
+                self._ver_status_label.configure(text=f"稳定版 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
+
+        self.root.after(0, update_ui)
+
+    def _render_stable_versions(self, all_versions, current_version):
+        for w in self._ver_stable_container.winfo_children():
+            w.destroy()
+
+        if not all_versions:
+            ctk.CTkLabel(self._ver_stable_container, text="暂无稳定版本",
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=COLOR_DIM).pack(padx=12, pady=10)
+            return
+
+        for v in all_versions:
+            ver = v["version"]
+            is_current = (ver == current_version)
+            is_available = v.get("available", False)
+            is_remote_new = v.get("is_remote_new", False)
+            changes = v.get("changes", [])
+            exe_info = v.get("exe_info")
+
+            if is_current:
+                card_bg = "#162016"
+                border_color = "#1f3a1f"
+            elif is_remote_new:
+                card_bg = "#161620"
+                border_color = "#1f3a4f"
+            elif is_available:
+                card_bg = "#161616"
+                border_color = "#222"
+            else:
+                card_bg = "#111"
+                border_color = "#1a1a1a"
+
+            card = ctk.CTkFrame(self._ver_stable_container, fg_color=card_bg, corner_radius=6,
+                               border_width=1, border_color=border_color)
+            card.pack(fill="x", pady=3, padx=2)
+
+            header = ctk.CTkFrame(card, fg_color=card_bg)
+            header.pack(fill="x", padx=10, pady=(6, 2))
+
+            ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else (COLOR_TEXT if is_available else COLOR_DIM))
+            ctk.CTkLabel(header, text=f"v{ver}", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+                        text_color=ver_color).pack(side="left")
+
+            build_time = v.get("build_time", "")
+            if build_time:
+                ctk.CTkLabel(header, text=build_time[:16], font=ctk.CTkFont(family="Consolas", size=10),
+                            text_color="#555").pack(side="left", padx=8)
+
+            if is_remote_new:
+                ctk.CTkLabel(header, text="🆕 远程新版本", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#42A5F5").pack(side="left", padx=4)
+            elif is_available and exe_info:
+                ctk.CTkLabel(header, text="📦 含EXE稳定版", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#FF9800").pack(side="left", padx=4)
+                if exe_info.get("size_mb"):
+                    ctk.CTkLabel(header, text=f"{exe_info['size_mb']}MB", font=ctk.CTkFont(family="Consolas", size=10),
+                                text_color="#555").pack(side="left", padx=4)
+
+            if is_current:
+                ctk.CTkLabel(header, text="● 当前版本", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#4CAF50").pack(side="right", padx=4)
+            elif is_available and exe_info:
+                ctk.CTkButton(header, text="切换", width=50, height=22, fg_color="#1e1e1e", hover_color="#2a2a2a",
+                             text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                             command=lambda p=exe_info["path"], gc=v.get("git_commit", ""): self._switch_to_exe(p, gc)).pack(side="right", padx=4)
+
+            detail = ctk.CTkFrame(card, fg_color=card_bg)
+            detail.pack(fill="x", padx=10, pady=(0, 6))
+
+            git_commit = v.get("git_commit", "")
+            if git_commit:
+                ctk.CTkLabel(detail, text=f"🔗 commit: {git_commit}", font=ctk.CTkFont(family="Consolas", size=9),
+                            text_color="#555").pack(anchor="w")
+
+            if changes:
+                for ch in changes[:3]:
+                    ctk.CTkLabel(detail, text=f"· {ch}", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                text_color="#777", wraplength=500, justify="left").pack(anchor="w")
+                if len(changes) > 3:
+                    ctk.CTkLabel(detail, text=f"  +{len(changes)-3}项更多...", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                text_color="#444").pack(anchor="w")
+            else:
+                ctk.CTkLabel(detail, text="暂无修改记录", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#3a3a3a").pack(anchor="w")
+
+    def _render_git_history(self, git_commits):
+        for w in self._ver_git_container.winfo_children():
+            w.destroy()
+
+        if not self._is_git_repo():
+            ctk.CTkLabel(self._ver_git_container, text="当前不是 Git 仓库，无法使用 Git 版本切换",
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color="#555").pack(pady=20)
+            return
+
+        if not git_commits:
+            ctk.CTkLabel(self._ver_git_container, text="暂无 Git 提交记录",
+                        font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color="#555").pack(pady=20)
+            return
+
+        current_commit = self._get_current_commit()
+
+        for commit in git_commits:
+            is_current = (commit["hash"] == current_commit)
+
+            if is_current:
+                card_bg = "#162016"
+                border_color = "#1f3a1f"
+            else:
+                card_bg = "#161616"
+                border_color = "#2a2a2a"
+
+            card = ctk.CTkFrame(self._ver_git_container, fg_color=card_bg, corner_radius=6,
+                               border_width=1, border_color=border_color)
+            card.pack(fill="x", pady=2, padx=2)
+
+            header = ctk.CTkFrame(card, fg_color=card_bg)
+            header.pack(fill="x", padx=10, pady=(6, 2))
+
+            hash_color = "#4CAF50" if is_current else "#42A5F5"
+            ctk.CTkLabel(header, text=commit["hash"], font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                        text_color=hash_color).pack(side="left")
+
+            ctk.CTkLabel(header, text=commit.get("time", ""), font=ctk.CTkFont(family="Consolas", size=9),
+                        text_color="#666").pack(side="left", padx=8)
+
+            if is_current:
+                ctk.CTkLabel(header, text="● 当前", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#4CAF50").pack(side="right", padx=4)
+            else:
+                ctk.CTkButton(header, text="切换", width=50, height=22, fg_color="#1e1e1e", hover_color="#2a2a2a",
+                             text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                             command=lambda h=commit["hash"]: self._switch_git_commit(h)).pack(side="right", padx=4)
+
+            msg_frame = ctk.CTkFrame(card, fg_color=card_bg)
+            msg_frame.pack(fill="x", padx=10, pady=(0, 6))
+            ctk.CTkLabel(msg_frame, text=commit["message"], font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                        text_color="#ccc", wraplength=500, justify="left").pack(anchor="w")
+            ctk.CTkLabel(msg_frame, text=f"👤 {commit.get('author', '')}", font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+                        text_color="#666").pack(anchor="w")
+
+    def _refresh_git_history(self):
+        if self._ver_git_container is None or not self._ver_git_container.winfo_exists():
+            return
+        git_commits = self._get_git_history(30)
+        self._render_git_history(git_commits)
+
+    def _check_remote_versions(self):
+        if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
+            self._ver_status_label.configure(text="正在检查远程更新...")
+        threading.Thread(target=self._do_check_remote, daemon=True).start()
+
+    def _do_check_remote(self):
+        try:
+            import subprocess
+            project_root = self._get_project_root()
+            git_dir = os.path.join(project_root, ".git")
+            if not os.path.isdir(git_dir):
+                raise Exception("未找到Git仓库，无法检查远程更新")
+
+            fetch_result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True,
+                                         cwd=project_root, timeout=30,
+                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            if fetch_result.returncode != 0:
+                raise Exception(f"git fetch 失败: {fetch_result.stderr.strip()}")
+
+            show_result = subprocess.run(["git", "show", "origin/main:dev/ver/version.json"],
+                                        capture_output=True, text=True, cwd=project_root, timeout=10,
+                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            if show_result.returncode != 0:
+                raise Exception(f"获取远程version.json失败: {show_result.stderr.strip()}")
+
+            data = json.loads(show_result.stdout)
+            remote_latest = data.get("latest", "")
+            remote_versions = {v["version"]: v for v in data.get("versions", [])}
+
+            stable_exes = self._list_stable_exes()
+            exe_versions = {e["version"]: e for e in stable_exes}
+            local_versions = self._get_local_version_history()
+            git_commits = self._get_git_history(30)
+
+            import re
+            current_version = VERSION
+            local_ver_set = set()
+            all_versions = []
+
+            for v in local_versions:
+                ver = v.get("version", "")
+                m = re.search(r'v?(\d+\.\d+\.\d+\.\d+)', ver)
+                ver_num = m.group(1) if m else ver
+                if not ver_num:
+                    continue
+                local_ver_set.add(ver_num)
+                all_versions.append({
+                    "version": ver_num,
+                    "name": v.get("name", f"v{ver_num}"),
+                    "changes": v.get("changes", []),
+                    "build_time": v.get("build_time", v.get("date", "")),
+                    "git_commit": v.get("git_commit", ""),
+                    "available": ver_num in exe_versions,
+                    "exe_info": exe_versions.get(ver_num),
+                    "is_remote_new": False,
+                })
+
+            for rv, rinfo in remote_versions.items():
+                m = re.search(r'v?(\d+\.\d+\.\d+\.\d+)', rv)
+                ver_num = m.group(1) if m else rv
+                if not ver_num or ver_num in local_ver_set:
+                    continue
+                all_versions.append({
+                    "version": ver_num,
+                    "name": rinfo.get("name", f"v{ver_num}"),
+                    "changes": rinfo.get("changes", []),
+                    "build_time": rinfo.get("build_time", rinfo.get("date", "")),
+                    "git_commit": rinfo.get("git_commit", ""),
+                    "available": ver_num in exe_versions,
+                    "exe_info": exe_versions.get(ver_num),
+                    "is_remote_new": True,
+                })
+
+            for ver, exe in exe_versions.items():
+                if ver not in local_ver_set:
+                    all_versions.append({
+                        "version": ver,
+                        "name": exe["filename"],
+                        "changes": [],
+                        "build_time": "",
+                        "git_commit": "",
+                        "available": True,
+                        "exe_info": exe,
+                        "is_remote_new": False,
+                    })
+
+            all_versions.sort(key=lambda x: x["version"], reverse=True)
+
+            def update_ui():
+                if self._ver_stable_container is not None and self._ver_stable_container.winfo_exists():
+                    self._render_stable_versions(all_versions, current_version)
+                if self._ver_git_container is not None and self._ver_git_container.winfo_exists():
+                    self._render_git_history(git_commits)
+                if self._ver_info_label is not None and self._ver_info_label.winfo_exists():
+                    has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
+                    if has_update:
+                        self._ver_info_label.configure(text=f"🆕 发现新版本 v{remote_latest}")
+                    else:
+                        self._ver_info_label.configure(text="✅ 已是最新版本")
+                if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
+                    self._ver_status_label.configure(text=f"稳定版 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
+
+            self.root.after(0, update_ui)
+        except Exception as e:
+            self.root.after(0, lambda: self._ver_status_label.configure(text=f"检查失败: {e}") if self._ver_status_label is not None and self._ver_status_label.winfo_exists() else None)
+
+    def _switch_to_exe(self, exe_path, git_commit=""):
+        if not os.path.exists(exe_path):
+            messagebox.showerror("错误", f"版本文件不存在:\n{exe_path}")
+            return
+
+        dev_dir = self._get_dev_dir()
+        exe_filename = os.path.basename(exe_path)
+        dev_exe_path = os.path.join(dev_dir, exe_filename)
+
+        try:
+            import shutil
+            shutil.copy2(exe_path, dev_exe_path)
+        except Exception:
+            dev_exe_path = exe_path
+
+        if git_commit and self._is_git_repo():
+            r = self._run_git("stash")
+            stashed = r["ok"] and "Saved" in r["stdout"]
+            r = self._run_git("checkout", git_commit, timeout=30)
+            if not r["ok"]:
+                if stashed:
+                    self._run_git("stash", "pop")
+            else:
+                if stashed:
+                    self._run_git("stash", "pop")
+
+        current_pid = os.getpid()
+        cmd = f'ping -n 3 127.0.0.1 >nul & start "" "{dev_exe_path}"'
+        subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
+        self.root.destroy()
+
+    def _switch_git_commit(self, commit_hash):
+        if not self._is_git_repo():
+            messagebox.showerror("错误", "不是 Git 仓库，无法切换版本")
+            return
+
+        r = self._run_git("stash")
+        stashed = r["ok"] and "Saved" in r["stdout"]
+
+        r = self._run_git("checkout", commit_hash, timeout=60)
+        if not r["ok"]:
+            messagebox.showerror("切换失败", f"Git checkout 失败:\n{r['stderr'][:200]}")
+            if stashed:
+                self._run_git("stash", "pop")
+            return
+
+        if stashed:
+            self._run_git("stash", "pop")
+
+        dev_dir = self._get_dev_dir()
+        active_exe = os.path.join(dev_dir, "云集智能文件清理专家.exe")
+        if os.path.exists(active_exe):
+            current_pid = os.getpid()
+            cmd = f'ping -n 3 127.0.0.1 >nul & start "" "{active_exe}"'
+            subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.root.destroy()
+        else:
+            messagebox.showinfo("切换成功", f"已切换到 commit {commit_hash}\n请重启软件以加载新版本。")
+            self._refresh_git_history()
 
     def _do_verify_and_build_report_bg(self):
         removed = changed = 0
@@ -1652,9 +2191,9 @@ class GarbageCleanupTool:
             pass
 
     def setup_status_bar(self):
-        status_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
-        status_frame.pack(side="bottom", fill="x", padx=10, pady=(2, 4))
-        status_info = ctk.CTkFrame(status_frame, fg_color=COLOR_BG)
+        self.status_frame = ctk.CTkFrame(self.main_frame, fg_color=COLOR_BG, border_width=0)
+        self.status_frame.pack(side="bottom", fill="x", padx=10, pady=(2, 4))
+        status_info = ctk.CTkFrame(self.status_frame, fg_color=COLOR_BG)
         status_info.pack(fill="x", padx=5, pady=2)
         self.status_label = ctk.CTkLabel(status_info, text="✅ 准备就绪", anchor="w",
                                        font=ctk.CTkFont(family=FONT_FAMILY, weight="bold"), text_color=COLOR_TEXT)
@@ -1674,10 +2213,10 @@ class GarbageCleanupTool:
 
         self.progress_label = ctk.CTkLabel(status_info, text="", anchor="e", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT)
         self.progress_label.pack(side="right", padx=5)
-        self.progress_bar = ctk.CTkProgressBar(status_frame, height=8, fg_color=COLOR_BORDER, progress_color=COLOR_RED)
+        self.progress_bar = ctk.CTkProgressBar(self.status_frame, height=8, fg_color=COLOR_BORDER, progress_color=COLOR_RED)
         self.progress_bar.pack(fill="x", padx=10, pady=(0, 2))
         self.progress_bar.set(0)
-        count_row = ctk.CTkFrame(status_frame, fg_color=COLOR_BG)
+        count_row = ctk.CTkFrame(self.status_frame, fg_color=COLOR_BG)
         count_row.pack(fill="x", padx=5, pady=2)
         self.count_label = ctk.CTkLabel(count_row, text="📊 文件: 0 | 总大小: 0 MB", anchor="w",
                                        text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12))

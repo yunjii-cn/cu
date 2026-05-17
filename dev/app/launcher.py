@@ -2,9 +2,26 @@ import sys
 import os
 import time
 
+APP_BASE_NAME = "云集智能文件清理专家"
+
 if sys.platform == 'win32':
     try:
-        import ctypes
+        import psutil
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                pname = proc.info['name']
+                if pname and pname.lower().startswith(APP_BASE_NAME) and pname.lower().endswith('.exe'):
+                    if proc.info['pid'] != current_pid:
+                        proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+    try:
+        ctypes = __import__('ctypes')
         EVENT_MODIFY_STATE = 0x0002
         WAIT_OBJECT_0 = 0x00000000
         INFINITE = 0xFFFFFFFF
