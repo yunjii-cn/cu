@@ -587,7 +587,6 @@ class GarbageCleanupTool:
 
         self.setup_ui()
         self._set_icon()
-        self._try_restore_results()
 
     def _on_closing(self):
         self._save_all_state()
@@ -937,8 +936,8 @@ class GarbageCleanupTool:
             if col_idx is None:
                 continue
 
-            dropdown = ctk.CTkFrame(self._cat_grid, fg_color="#1e1e1e", corner_radius=4)
-            dropdown.grid(row=1, column=col_idx, padx=2, pady=(2, 2), sticky="new")
+            dropdown = ctk.CTkFrame(self._cat_grid, fg_color="#1e1e1e", corner_radius=0)
+            dropdown.grid(row=1, column=col_idx, padx=7, pady=(0, 2), sticky="new")
 
             parent_bg = self.category_colors.get(cat_id, COLOR_BG)
 
@@ -950,7 +949,7 @@ class GarbageCleanupTool:
                     self.preset_vars[child_id] = child_var
 
                 child_row = ctk.CTkFrame(dropdown, fg_color="#1e1e1e")
-                child_row.pack(fill="x", padx=4, pady=1)
+                child_row.pack(fill="x", pady=1)
 
                 _, child_cb, _ = self._create_cat_tag_row(
                     child_row, child_id, child_info_d, self.preset_vars[child_id],
@@ -1669,6 +1668,9 @@ class GarbageCleanupTool:
         ctk.CTkButton(btn_row, text="保存进度", width=70, height=26, fg_color="#333", hover_color="#555",
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
                      command=self.save_current_progress).pack(side="left", padx=2)
+        ctk.CTkButton(btn_row, text="恢复进度", width=70, height=26, fg_color="#333", hover_color="#555",
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     command=self._show_restore_menu).pack(side="left", padx=2)
 
         self.progress_label = ctk.CTkLabel(status_info, text="", anchor="e", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT)
         self.progress_label.pack(side="right", padx=5)
@@ -2543,12 +2545,46 @@ class GarbageCleanupTool:
         }
         save_scan_results(data)
 
-    def _try_restore_results(self):
+    def _show_restore_menu(self):
+        menu = tk.Menu(self.root, tearoff=0, bg="#2a2a2a", fg=COLOR_TEXT,
+                      activebackground=COLOR_RED, activeforeground=COLOR_TEXT,
+                      font=(FONT_FAMILY, 11))
+        has_auto = load_scan_results() is not None
+        if has_auto:
+            menu.add_command(label="恢复上次自动保存", command=self._restore_auto)
+        else:
+            menu.add_command(label="恢复上次自动保存（无数据）", state="disabled")
+        menu.add_command(label="从进度文件恢复...", command=self._restore_from_file)
+        menu.tk_popup(*self.root.winfo_pointerxy())
+
+    def _restore_auto(self):
         data = load_scan_results()
-        if not data: return
+        if not data:
+            messagebox.showinfo("提示", "没有找到自动保存的扫描结果")
+            return
+        self._do_restore(data)
+
+    def _restore_from_file(self):
+        fp = filedialog.askopenfilename(title="选择进度文件", filetypes=[("JSON文件", "*.json")])
+        if not fp:
+            return
+        try:
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            messagebox.showerror("加载失败", f"无法读取进度文件:\n{e}")
+            return
+        if not data.get("file_list"):
+            messagebox.showinfo("提示", "进度文件中没有扫描结果")
+            return
+        self._do_restore(data)
+
+    def _do_restore(self, data):
         saved = data.get("file_list", [])
-        if not saved: return
-        self.status_label.configure(text="📂 正在恢复上次扫描结果...")
+        if not saved:
+            messagebox.showinfo("提示", "没有可恢复的结果")
+            return
+        self.status_label.configure(text="📂 正在恢复扫描结果...")
         self.root.update_idletasks()
 
         def do_restore():
@@ -2558,7 +2594,7 @@ class GarbageCleanupTool:
                 if fp and os.path.exists(fp):
                     valid.append(fi)
             if not valid:
-                self.root.after(0, lambda: self.status_label.configure(text="📂 上次结果已失效，请重新扫描"))
+                self.root.after(0, lambda: self.status_label.configure(text="📂 结果已失效，请重新扫描"))
                 return
 
             def update_ui():
@@ -2573,7 +2609,7 @@ class GarbageCleanupTool:
                     self.dir_entry.delete(0, "end")
                     self.dir_entry.insert(0, sd)
                 self.display_files()
-                self.status_label.configure(text=f"📂 已恢复上次结果 ({data.get('scan_time', '')})")
+                self.status_label.configure(text=f"📂 已恢复扫描结果 ({data.get('scan_time', '')})")
 
             self.root.after(0, update_ui)
 
