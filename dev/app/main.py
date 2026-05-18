@@ -1392,25 +1392,33 @@ class GarbageCleanupTool:
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=self._check_remote_versions).pack(side="right", padx=5, pady=6)
 
-        tab_bar = ctk.CTkFrame(page, fg_color="#1e1e1e", corner_radius=0, height=40)
+        tab_bar = ctk.CTkFrame(page, fg_color="#1e1e1e", corner_radius=0, height=44)
         tab_bar.pack(fill="x", padx=0, pady=0)
         tab_bar.pack_propagate(False)
 
         self._ver_tab_stable_btn = ctk.CTkButton(
-            tab_bar, text="📦 EXE稳定版", width=140, height=30,
-            fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
-            text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
-            corner_radius=4,
+            tab_bar, text="📦 EXE稳定版", width=160, height=34,
+            fg_color="#2E7D32", hover_color="#388E3C",
+            text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            corner_radius=6,
             command=lambda: self._switch_ver_tab("stable"))
         self._ver_tab_stable_btn.pack(side="left", padx=(10, 4), pady=5)
 
         self._ver_tab_git_btn = ctk.CTkButton(
-            tab_bar, text="🔀 Git开发版", width=140, height=30,
-            fg_color="#2a2a2a", hover_color=COLOR_RED,
-            text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
-            corner_radius=4,
+            tab_bar, text="🔀 Git开发版", width=160, height=34,
+            fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+            text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            corner_radius=6,
             command=lambda: self._switch_ver_tab("git"))
         self._ver_tab_git_btn.pack(side="left", padx=4, pady=5)
+
+        self._ver_expand_btn = ctk.CTkButton(
+            tab_bar, text="📋 全部展开", width=100, height=30,
+            fg_color="#333", hover_color=COLOR_RED,
+            text_color="#ccc", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            corner_radius=4,
+            command=self._toggle_expand_all)
+        self._ver_expand_btn.pack(side="right", padx=(4, 10), pady=7)
 
         self._ver_scroll = ctk.CTkScrollableFrame(page, fg_color=COLOR_BG, corner_radius=0)
         self._ver_scroll.pack(fill="both", expand=True, padx=0, pady=0)
@@ -1420,6 +1428,7 @@ class GarbageCleanupTool:
         self._ver_current_version = VERSION
         self._ver_active_tab = "stable"
         self._ver_info_text = "点击「检查远程更新」查看最新版本"
+        self._ver_expanded = False
 
         self._ver_status_label.configure(text="加载中...")
         self.root.after(100, self._load_all_versions)
@@ -1437,10 +1446,12 @@ class GarbageCleanupTool:
         self._ver_status_label = None
         self._ver_tab_stable_btn = None
         self._ver_tab_git_btn = None
+        self._ver_expand_btn = None
         self._ver_stable_data = []
         self._ver_git_data = []
         self._ver_active_tab = "stable"
         self._ver_info_text = ""
+        self._ver_expanded = False
         self._restore_main_ui()
 
     def _switch_ver_tab(self, tab):
@@ -1448,19 +1459,19 @@ class GarbageCleanupTool:
             return
         self._ver_active_tab = tab
         if tab == "stable":
-            self._ver_tab_stable_btn.configure(fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+            self._ver_tab_stable_btn.configure(fg_color="#2E7D32", hover_color="#388E3C",
                                                 text_color=COLOR_TEXT,
-                                                font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"))
-            self._ver_tab_git_btn.configure(fg_color="#2a2a2a", hover_color=COLOR_RED,
-                                             text_color="#aaa",
-                                             font=ctk.CTkFont(family=FONT_FAMILY, size=12))
-        else:
+                                                font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"))
             self._ver_tab_git_btn.configure(fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
                                              text_color=COLOR_TEXT,
-                                             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"))
-            self._ver_tab_stable_btn.configure(fg_color="#2a2a2a", hover_color=COLOR_RED,
-                                                text_color="#aaa",
-                                                font=ctk.CTkFont(family=FONT_FAMILY, size=12))
+                                             font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"))
+        else:
+            self._ver_tab_git_btn.configure(fg_color="#2E7D32", hover_color="#388E3C",
+                                             text_color=COLOR_TEXT,
+                                             font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"))
+            self._ver_tab_stable_btn.configure(fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                                                text_color=COLOR_TEXT,
+                                                font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"))
         self._render_active_tab()
 
     def _render_active_tab(self):
@@ -1472,6 +1483,57 @@ class GarbageCleanupTool:
             self._render_stable_tab()
         else:
             self._render_git_tab()
+
+    def _toggle_expand_all(self):
+        self._ver_expanded = not self._ver_expanded
+        if self._ver_expand_btn is not None and self._ver_expand_btn.winfo_exists():
+            if self._ver_expanded:
+                self._ver_expand_btn.configure(text="📋 全部折叠", fg_color="#2E7D32", hover_color="#388E3C")
+            else:
+                self._ver_expand_btn.configure(text="📋 全部展开", fg_color="#333", hover_color=COLOR_RED)
+        self._render_active_tab()
+
+    def _toggle_card_detail(self, card, data, card_type):
+        for w in card.winfo_children():
+            if hasattr(w, '_is_detail') and w._is_detail:
+                w.destroy()
+                for btn in card.winfo_children():
+                    for child in btn.winfo_children():
+                        if hasattr(child, 'cget') and child.cget("text") in ("▼", "▶"):
+                            child.configure(text="▶")
+                return
+
+        card_bg = card.cget("fg_color")
+        detail = ctk.CTkFrame(card, fg_color=card_bg)
+        detail._is_detail = True
+        detail.pack(fill="x", padx=10, pady=(0, 6))
+
+        if card_type == "stable":
+            git_commit = data.get("git_commit", "")
+            if git_commit:
+                ctk.CTkLabel(detail, text=f"🔗 commit: {git_commit}", font=ctk.CTkFont(family="Consolas", size=9),
+                            text_color="#555").pack(anchor="w")
+            changes = data.get("changes", [])
+            if changes:
+                for ch in changes[:3]:
+                    ctk.CTkLabel(detail, text=f"· {ch}", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                text_color="#777", wraplength=500, justify="left").pack(anchor="w")
+                if len(changes) > 3:
+                    ctk.CTkLabel(detail, text=f"  +{len(changes)-3}项更多...", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                text_color="#444").pack(anchor="w")
+            else:
+                ctk.CTkLabel(detail, text="暂无修改记录", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#3a3a3a").pack(anchor="w")
+        else:
+            ctk.CTkLabel(detail, text=data["message"], font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                        text_color="#ccc", wraplength=500, justify="left").pack(anchor="w")
+            ctk.CTkLabel(detail, text=f"👤 {data.get('author', '')}", font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+                        text_color="#666").pack(anchor="w")
+
+        for btn in card.winfo_children():
+            for child in btn.winfo_children():
+                if hasattr(child, 'cget') and child.cget("text") in ("▼", "▶"):
+                    child.configure(text="▼")
 
     def _render_stable_tab(self):
         self._ver_info_frame = ctk.CTkFrame(self._ver_scroll, fg_color="#1e1e1e", corner_radius=6)
@@ -1655,6 +1717,8 @@ class GarbageCleanupTool:
                         font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=COLOR_DIM).pack(padx=12, pady=10)
             return
 
+        expanded = self._ver_expanded
+
         for v in all_versions:
             ver = v["version"]
             is_current = (ver == current_version)
@@ -1664,8 +1728,8 @@ class GarbageCleanupTool:
             exe_info = v.get("exe_info")
 
             if is_current:
-                card_bg = "#151525"
-                border_color = "#1f2a4f"
+                card_bg = "#152015"
+                border_color = "#1f3a1f"
             elif is_remote_new:
                 card_bg = "#161620"
                 border_color = "#1f3a4f"
@@ -1683,7 +1747,7 @@ class GarbageCleanupTool:
             header = ctk.CTkFrame(card, fg_color=card_bg)
             header.pack(fill="x", padx=10, pady=(6, 2))
 
-            ver_color = "#5DADE2" if is_current else ("#42A5F5" if is_remote_new else (COLOR_TEXT if is_available else COLOR_DIM))
+            ver_color = "#4CAF50" if is_current else ("#42A5F5" if is_remote_new else (COLOR_TEXT if is_available else COLOR_DIM))
             ctk.CTkLabel(header, text=f"v{ver}", font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
                         text_color=ver_color).pack(side="left")
 
@@ -1704,30 +1768,41 @@ class GarbageCleanupTool:
 
             if is_current:
                 ctk.CTkLabel(header, text="● 当前版本", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                            text_color="#5DADE2").pack(side="right", padx=4)
+                            text_color="#4CAF50").pack(side="right", padx=4)
             elif is_available and exe_info:
                 ctk.CTkButton(header, text="切换", width=50, height=22, fg_color="#1e1e1e", hover_color="#2a2a2a",
                              text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
                              command=lambda p=exe_info["path"], gc=v.get("git_commit", ""): self._switch_to_exe(p, gc)).pack(side="right", padx=4)
 
-            detail = ctk.CTkFrame(card, fg_color=card_bg)
-            detail.pack(fill="x", padx=10, pady=(0, 6))
+            has_detail = bool(changes) or bool(v.get("git_commit", ""))
+            if has_detail:
+                toggle_text = "▼" if expanded else "▶"
+                toggle_btn = ctk.CTkButton(header, text=toggle_text, width=24, height=22,
+                                           fg_color=card_bg, hover_color="#2a2a2a",
+                                           text_color="#888", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                           corner_radius=3,
+                                           command=lambda c=card, v_data=v: self._toggle_card_detail(c, v_data, "stable"))
+                toggle_btn.pack(side="right", padx=2)
 
-            git_commit = v.get("git_commit", "")
-            if git_commit:
-                ctk.CTkLabel(detail, text=f"🔗 commit: {git_commit}", font=ctk.CTkFont(family="Consolas", size=9),
-                            text_color="#555").pack(anchor="w")
+            if expanded and has_detail:
+                detail = ctk.CTkFrame(card, fg_color=card_bg)
+                detail.pack(fill="x", padx=10, pady=(0, 6))
 
-            if changes:
-                for ch in changes[:3]:
-                    ctk.CTkLabel(detail, text=f"· {ch}", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                                text_color="#777", wraplength=500, justify="left").pack(anchor="w")
-                if len(changes) > 3:
-                    ctk.CTkLabel(detail, text=f"  +{len(changes)-3}项更多...", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                                text_color="#444").pack(anchor="w")
-            else:
-                ctk.CTkLabel(detail, text="暂无修改记录", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                            text_color="#3a3a3a").pack(anchor="w")
+                git_commit = v.get("git_commit", "")
+                if git_commit:
+                    ctk.CTkLabel(detail, text=f"🔗 commit: {git_commit}", font=ctk.CTkFont(family="Consolas", size=9),
+                                text_color="#555").pack(anchor="w")
+
+                if changes:
+                    for ch in changes[:3]:
+                        ctk.CTkLabel(detail, text=f"· {ch}", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                    text_color="#777", wraplength=500, justify="left").pack(anchor="w")
+                    if len(changes) > 3:
+                        ctk.CTkLabel(detail, text=f"  +{len(changes)-3}项更多...", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                    text_color="#444").pack(anchor="w")
+                else:
+                    ctk.CTkLabel(detail, text="暂无修改记录", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                text_color="#3a3a3a").pack(anchor="w")
 
     def _render_git_history(self, git_commits):
         if self._ver_git_container is None or not self._ver_git_container.winfo_exists():
@@ -1746,13 +1821,14 @@ class GarbageCleanupTool:
             return
 
         current_commit = self._get_current_commit()
+        expanded = self._ver_expanded
 
         for commit in git_commits:
             is_current = (commit["hash"] == current_commit)
 
             if is_current:
-                card_bg = "#151525"
-                border_color = "#1f2a4f"
+                card_bg = "#152015"
+                border_color = "#1f3a1f"
             else:
                 card_bg = "#161616"
                 border_color = "#2a2a2a"
@@ -1764,7 +1840,7 @@ class GarbageCleanupTool:
             header = ctk.CTkFrame(card, fg_color=card_bg)
             header.pack(fill="x", padx=10, pady=(6, 2))
 
-            hash_color = "#5DADE2" if is_current else "#42A5F5"
+            hash_color = "#4CAF50" if is_current else "#42A5F5"
             ctk.CTkLabel(header, text=commit["hash"], font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
                         text_color=hash_color).pack(side="left")
 
@@ -1773,18 +1849,27 @@ class GarbageCleanupTool:
 
             if is_current:
                 ctk.CTkLabel(header, text="● 当前", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                            text_color="#5DADE2").pack(side="right", padx=4)
+                            text_color="#4CAF50").pack(side="right", padx=4)
             else:
                 ctk.CTkButton(header, text="切换", width=50, height=22, fg_color="#1e1e1e", hover_color="#2a2a2a",
                              text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
                              command=lambda h=commit["hash"]: self._switch_git_commit(h)).pack(side="right", padx=4)
 
-            msg_frame = ctk.CTkFrame(card, fg_color=card_bg)
-            msg_frame.pack(fill="x", padx=10, pady=(0, 6))
-            ctk.CTkLabel(msg_frame, text=commit["message"], font=ctk.CTkFont(family=FONT_FAMILY, size=10),
-                        text_color="#ccc", wraplength=500, justify="left").pack(anchor="w")
-            ctk.CTkLabel(msg_frame, text=f"👤 {commit.get('author', '')}", font=ctk.CTkFont(family=FONT_FAMILY, size=9),
-                        text_color="#666").pack(anchor="w")
+            toggle_text = "▼" if expanded else "▶"
+            toggle_btn = ctk.CTkButton(header, text=toggle_text, width=24, height=22,
+                                       fg_color=card_bg, hover_color="#2a2a2a",
+                                       text_color="#888", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                                       corner_radius=3,
+                                       command=lambda c=card, c_data=commit: self._toggle_card_detail(c, c_data, "git"))
+            toggle_btn.pack(side="right", padx=2)
+
+            if expanded:
+                msg_frame = ctk.CTkFrame(card, fg_color=card_bg)
+                msg_frame.pack(fill="x", padx=10, pady=(0, 6))
+                ctk.CTkLabel(msg_frame, text=commit["message"], font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                            text_color="#ccc", wraplength=500, justify="left").pack(anchor="w")
+                ctk.CTkLabel(msg_frame, text=f"👤 {commit.get('author', '')}", font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+                            text_color="#666").pack(anchor="w")
 
     def _refresh_git_history(self):
         git_commits = self._get_git_history(30)
