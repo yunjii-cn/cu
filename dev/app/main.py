@@ -452,6 +452,12 @@ def get_base_dir():
 
 def get_app_dir():
     d = os.path.join(get_base_dir(), "app")
+    old_d = os.path.join(get_base_dir(), "data")
+    if os.path.isdir(old_d) and not os.path.isdir(d):
+        try:
+            os.rename(old_d, d)
+        except Exception:
+            d = old_d
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -1381,6 +1387,10 @@ class GarbageCleanupTool:
         ctk.CTkButton(top_bar, text="← 返回扫描", width=90, height=30, fg_color="#333", hover_color=COLOR_RED,
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                      command=self._close_version_page).pack(side="left", padx=10, pady=8)
+        ctk.CTkButton(top_bar, text="关于", width=50, height=30, fg_color="#333", hover_color="#555",
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                     corner_radius=4,
+                     command=self._show_about_dialog).pack(side="left", padx=(0, 4), pady=6)
         ctk.CTkLabel(top_bar, text="🔄 软件更新与版本管理", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
                     text_color=COLOR_TEXT).pack(side="left", padx=5)
         ctk.CTkLabel(top_bar, text=f"v{VERSION}", font=ctk.CTkFont(family=FONT_FAMILY, size=12),
@@ -1432,6 +1442,70 @@ class GarbageCleanupTool:
 
         self._ver_status_label.configure(text="加载中...")
         self.root.after(100, self._load_all_versions)
+
+    def _show_about_dialog(self):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("关于")
+        dialog.geometry("480x520")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 480) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 520) // 2
+        dialog.geometry(f"+{x}+{y}")
+        frame = ctk.CTkFrame(dialog, fg_color="#1e1e1e", corner_radius=8)
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+        ctk.CTkLabel(frame, text="云集智能文件清理专家",
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
+                     text_color=COLOR_TEXT).pack(pady=(20, 2))
+        ctk.CTkLabel(frame, text="智能扫描 · 精准分类 · 一键清理",
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                     text_color=COLOR_DIM).pack(pady=(0, 4))
+        ctk.CTkLabel(frame, text=f"版本 v{VERSION}",
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     text_color=COLOR_DIM).pack(pady=(0, 12))
+        desc_frame = ctk.CTkFrame(frame, fg_color="#252525", corner_radius=6)
+        desc_frame.pack(fill="x", padx=20, pady=(0, 8))
+        features = [
+            "智能文件扫描与分类（按类型/大小/时间/重复文件）",
+            "文件类型自定义颜色标记",
+            "重复文件检测与批量留存策略",
+            "预设规则包（7种社区成熟清理规则）",
+            "分析报告（饼状图+统计+建议方案）",
+            "文件批量删除/移动/导出",
+            "软件版本管理与硬链接切换",
+        ]
+        for feat in features:
+            ctk.CTkLabel(desc_frame, text=f"  · {feat}",
+                         font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                         text_color="#ccc", anchor="w").pack(fill="x", padx=8, pady=1)
+        ctk.CTkLabel(frame, text="开源协议: GPL-3.0",
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     text_color=COLOR_DIM).pack(pady=(8, 2))
+        ctk.CTkLabel(frame, text="Copyright © 2026 云集智能 (yunjii)",
+                     font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     text_color=COLOR_DIM).pack(pady=(0, 8))
+        links_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        links_frame.pack(pady=(0, 12))
+        link_font = ctk.CTkFont(family=FONT_FAMILY, size=11, underline=True)
+        ctk.CTkLabel(links_frame, text="GitHub", font=link_font,
+                     text_color="#4FC3F7", cursor="hand2",
+                     command=lambda: self._open_url("https://github.com/yunjii-cn/cu")).pack(side="left", padx=12)
+        ctk.CTkLabel(links_frame, text="Gitee", font=link_font,
+                     text_color="#4FC3F7", cursor="hand2",
+                     command=lambda: self._open_url("https://gitee.com/yunjii/cu")).pack(side="left", padx=12)
+        ctk.CTkLabel(links_frame, text="问题反馈", font=link_font,
+                     text_color="#4FC3F7", cursor="hand2",
+                     command=lambda: self._open_url("https://github.com/yunjii-cn/cu/issues")).pack(side="left", padx=12)
+        ctk.CTkButton(frame, text="关闭", width=100, height=32,
+                     fg_color="#444", hover_color="#555",
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                     command=dialog.destroy).pack(pady=(0, 16))
+
+    def _open_url(self, url):
+        import webbrowser
+        webbrowser.open(url)
 
     def _close_version_page(self):
         self._current_panel_type = None
@@ -1576,8 +1650,34 @@ class GarbageCleanupTool:
 
     def _get_dev_dir(self):
         if getattr(sys, 'frozen', False):
-            return os.path.dirname(sys.executable)
+            exe_dir = os.path.dirname(sys.executable)
+            search_dir = exe_dir
+            for _ in range(5):
+                if os.path.exists(os.path.join(search_dir, ".yunji.lock")):
+                    return search_dir
+                if os.path.exists(os.path.join(search_dir, "app")):
+                    return search_dir
+                parent = os.path.dirname(search_dir)
+                if parent == search_dir:
+                    break
+                search_dir = parent
+            if os.path.basename(exe_dir) == "ver":
+                return os.path.dirname(exe_dir)
+            return exe_dir
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _read_token(self, filename):
+        try:
+            dev_dir = self._get_dev_dir()
+            app_dir = os.path.join(dev_dir, "app")
+            for search_dir in [app_dir, dev_dir]:
+                path = os.path.join(search_dir, filename)
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        return f.read().strip()
+        except Exception:
+            pass
+        return ""
 
     def _run_git(self, *args, cwd=None, timeout=60):
         import subprocess
@@ -1896,7 +1996,7 @@ class GarbageCleanupTool:
             if fetch_result.returncode != 0:
                 raise Exception(f"git fetch 失败: {fetch_result.stderr.strip()}")
 
-            show_result = subprocess.run(["git", "show", "origin/main:dev/ver/version.json"],
+            show_result = subprocess.run(["git", "show", "origin/main:ver/version.json"],
                                         capture_output=True, text=True, cwd=project_root, timeout=10,
                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             if show_result.returncode != 0:

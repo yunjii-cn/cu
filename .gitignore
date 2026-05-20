@@ -1,49 +1,69 @@
-# 备份文件
-BAK/
+# ========== 标记文件（本地使用） ==========
+.yunji.lock
 
-# EXE文件（体积大，不纳入Git，用户通过构建脚本生成）
-# 但ver/目录下的EXE是稳定版本，需要上传
+# ========== EXE文件（体积大，通过Release分发） ==========
 *.exe
-!ver/*.exe
 
-# PyInstaller运行时目录（onedir模式的_internal/）
+# ========== PyInstaller运行时目录 ==========
 _internal/
 
-# Python缓存
+# ========== Python缓存 ==========
 __pycache__/
 *.pyc
 *.pyo
 
-# 构建目录（包含按版本组织的构建脚本和PyInstaller临时文件，不上传远程仓库）
+# ========== 构建目录（包含按版本组织的构建脚本和PyInstaller临时文件） ==========
 build/
 
-# PyInstaller其他临时文件
+# ========== PyInstaller其他临时文件 ==========
 dist/
 *.spec
 
-# 运行时配置（用户本地生成，存放在app/子目录下）
+# ========== 核心源码（公开仓库，入Git） ==========
+# dev/app/ 中的源码文件纳入Git管理
+# 仅排除令牌和临时文件
+dev/app/.gitee_token
+dev/app/.github_token
+dev/app/nuitka-crash-report.xml
+dev/app/build-version.py
+
+# ========== 本地版本仓库（EXE文件，通过Release分发） ==========
+dev/ver/*.exe
+
+# ========== 远程版本缓存 ==========
+dev/ver/remote_cache.json
+dev/ver/git_cache.json
+
+# ========== 运行时配置（用户本地生成） ==========
 cleanup_settings.json
 scan_results.json
 
-# IDE
+# ========== Token文件（安全，已在dev/app/下排除） ==========
+.gitee_token
+.github_token
+
+# ========== IDE ==========
 .vscode/
 .idea/
 *.swp
 *.swo
+.trae/
 
-# 系统文件
+# ========== 系统文件 ==========
 Thumbs.db
 Desktop.ini
 .DS_Store
 
-# 虚拟环境
+# ========== 虚拟环境 ==========
 .venv/
 venv/
 
-# 日志
+# ========== 日志 ==========
 *.log
 
-# 旧版代码目录
+# ========== 旧版代码目录 ==========
+BAK/
+test/
 云集智能文件清理/
 nul
 dev/dev.zip
