@@ -3,6 +3,7 @@
 
 import os
 import sys
+import subprocess
 
 if getattr(sys, 'frozen', False):
     base = sys._MEIPASS
@@ -41,7 +42,56 @@ except Exception:
 
 VERSION = "DEV"
 VERSION_CHECK_URL = ""
-APP_NAME = f"云集智能文件清理专家 v{VERSION}"
+
+
+def _load_project_config():
+    _DEFAULTS = {
+        "brand_name": "云集智能文件清理专家",
+        "version_format": "%Y.%m.%d.%H%M",
+        "repos": {
+            "github": "AiMiCloud/yunji-file-cleanup",
+            "gitee": "AiMiCloud/yunji-file-cleanup"
+        },
+        "paths": {
+            "version_json": "release/version.json",
+            "dev": "dev",
+            "app": "app",
+            "ver": "ver",
+            "dist": "dist",
+            "build": "build",
+            "release": "release",
+            "lock_file": ".yunji.lock"
+        }
+    }
+
+    def _deep_merge(base, override):
+        result = dict(base)
+        for k, v in override.items():
+            if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+                result[k] = _deep_merge(result[k], v)
+            else:
+                result[k] = v
+        return result
+
+    for search_path in [
+        os.path.join(getattr(sys, '_MEIPASS', ''), 'project.json'),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'project.json'),
+    ]:
+        try:
+            with open(search_path, 'r', encoding='utf-8') as f:
+                return _deep_merge(_DEFAULTS, json.load(f))
+        except Exception:
+            continue
+    return _DEFAULTS
+
+
+_CFG = _load_project_config()
+
+BRAND_NAME = _CFG["brand_name"]
+GITHUB_REPO = _CFG["repos"]["github"]
+GITEE_REPO = _CFG["repos"]["gitee"]
+VERSION_JSON_PATH = _CFG["paths"]["version_json"]
+APP_NAME = f"{BRAND_NAME} v{VERSION}"
 
 COLOR_RED = "#CC0000"
 COLOR_RED_LIGHT = "#FF0000"
@@ -444,14 +494,89 @@ def recommend_params(sys_info):
         return {"max_display": 3000, "max_depth": 30, "batch_size": 15, "flush_interval": 0.2}
 
 
-def get_base_dir():
+def _self_deploy(exe_dir):
+    src_exe = os.path.abspath(sys.executable)
+    exe_basename = os.path.basename(src_exe)
+    if BRAND_NAME not in exe_basename:
+        correct_name = f"{BRAND_NAME}.exe"
+        messagebox.showerror("品牌校验失败",
+            f"可执行文件名已被修改，无法运行。\n\n当前文件名: {exe_basename}\n正确文件名: {correct_name}\n\n请将文件名改回「{correct_name}」后重试。")
+        sys.exit(1)
+
+    deploy_dir = os.path.join(exe_dir, BRAND_NAME)
+    lock_path = os.path.join(deploy_dir, _CFG["paths"]["lock_file"])
+    already_deployed = os.path.isdir(deploy_dir) and os.path.isfile(lock_path)
+
+    if already_deployed:
+        entry_exe = os.path.join(deploy_dir, f"{BRAND_NAME}.exe")
+        if os.path.isfile(entry_exe) and os.path.normpath(src_exe) != os.path.normpath(entry_exe):
+            subprocess.Popen([entry_exe, f"--cleanup={src_exe}"],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+            os._exit(0)
+        return deploy_dir
+
+    os.makedirs(deploy_dir, exist_ok=True)
+
+    ver_dir = os.path.join(deploy_dir, _CFG["paths"]["ver"])
+    os.makedirs(ver_dir, exist_ok=True)
+    app_dir = os.path.join(deploy_dir, _CFG["paths"]["app"])
+    os.makedirs(app_dir, exist_ok=True)
+
+    with open(lock_path, "w", encoding="utf-8") as f:
+        f.write("yunji")
+
+    if not exe_basename.startswith(BRAND_NAME + "-v"):
+        m = re.search(r'v(\d+\.\d+\.\d+\.\d+)', exe_basename)
+        ver_str = m.group(1) if m else datetime.now().strftime("%Y.%m.%d.%H%M")
+        new_name = f"{BRAND_NAME}-v{ver_str}.exe"
+    else:
+        new_name = exe_basename
+
+    target_exe = os.path.join(ver_dir, new_name)
+    if os.path.normpath(src_exe) != os.path.normpath(target_exe):
+        shutil.copy2(src_exe, target_exe)
+
+    entry_exe = os.path.join(deploy_dir, f"{BRAND_NAME}.exe")
+    need_relaunch = False
+    if not os.path.isfile(entry_exe):
+        try:
+            os.link(target_exe, entry_exe)
+        except OSError:
+            shutil.copy2(target_exe, entry_exe)
+        need_relaunch = True
+
+    if os.path.normpath(src_exe) != os.path.normpath(entry_exe):
+        subprocess.Popen([entry_exe, f"--cleanup={src_exe}"],
+                         creationflags=subprocess.CREATE_NO_WINDOW)
+        os._exit(0)
+
+    return deploy_dir
+
+
+def _find_dev_dir():
     if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        d = exe_dir
+        for _ in range(5):
+            if os.path.isfile(os.path.join(d, _CFG["paths"]["lock_file"])):
+                return d
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+        exe_basename = os.path.basename(sys.executable)
+        if exe_basename == f"{BRAND_NAME}.exe" and os.path.isfile(os.path.join(exe_dir, _CFG["paths"]["lock_file"])):
+            return exe_dir
+        return _self_deploy(exe_dir)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def get_base_dir():
+    return _find_dev_dir()
+
+
 def get_app_dir():
-    d = os.path.join(get_base_dir(), "app")
+    d = os.path.join(get_base_dir(), _CFG["paths"]["app"])
     old_d = os.path.join(get_base_dir(), "data")
     if os.path.isdir(old_d) and not os.path.isdir(d):
         try:
@@ -1407,7 +1532,7 @@ class GarbageCleanupTool:
         tab_bar.pack_propagate(False)
 
         self._ver_tab_stable_btn = ctk.CTkButton(
-            tab_bar, text="📦 EXE稳定版", width=160, height=34,
+            tab_bar, text="📦 软件版本", width=160, height=34,
             fg_color="#2E7D32", hover_color="#388E3C",
             text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             corner_radius=6,
@@ -1415,7 +1540,7 @@ class GarbageCleanupTool:
         self._ver_tab_stable_btn.pack(side="left", padx=(10, 4), pady=5)
 
         self._ver_tab_git_btn = ctk.CTkButton(
-            tab_bar, text="🔀 Git开发版", width=160, height=34,
+            tab_bar, text="🔀 开发动态", width=160, height=34,
             fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
             text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             corner_radius=6,
@@ -1423,8 +1548,8 @@ class GarbageCleanupTool:
         self._ver_tab_git_btn.pack(side="left", padx=4, pady=5)
 
         self._ver_expand_btn = ctk.CTkButton(
-            tab_bar, text="📋 全部展开", width=100, height=30,
-            fg_color="#333", hover_color=COLOR_RED,
+            tab_bar, text="📋 全部折叠", width=100, height=30,
+            fg_color="#2E7D32", hover_color="#388E3C",
             text_color="#ccc", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             corner_radius=4,
             command=self._toggle_expand_all)
@@ -1438,7 +1563,8 @@ class GarbageCleanupTool:
         self._ver_current_version = VERSION
         self._ver_active_tab = "stable"
         self._ver_info_text = "点击「检查远程更新」查看最新版本"
-        self._ver_expanded = False
+        self._ver_expanded = True
+        self._ver_card_expanded = {}
 
         self._ver_status_label.configure(text="加载中...")
         self.root.after(100, self._load_all_versions)
@@ -1525,7 +1651,8 @@ class GarbageCleanupTool:
         self._ver_git_data = []
         self._ver_active_tab = "stable"
         self._ver_info_text = ""
-        self._ver_expanded = False
+        self._ver_expanded = True
+        self._ver_card_expanded = {}
         self._restore_main_ui()
 
     def _switch_ver_tab(self, tab):
@@ -1565,17 +1692,24 @@ class GarbageCleanupTool:
                 self._ver_expand_btn.configure(text="📋 全部折叠", fg_color="#2E7D32", hover_color="#388E3C")
             else:
                 self._ver_expand_btn.configure(text="📋 全部展开", fg_color="#333", hover_color=COLOR_RED)
+        for v in self._ver_stable_data:
+            self._ver_card_expanded[v["version"]] = self._ver_expanded
         self._render_active_tab()
 
     def _toggle_card_detail(self, card, data, card_type):
-        for w in card.winfo_children():
-            if hasattr(w, '_is_detail') and w._is_detail:
-                w.destroy()
-                for btn in card.winfo_children():
-                    for child in btn.winfo_children():
-                        if hasattr(child, 'cget') and child.cget("text") in ("▼", "▶"):
-                            child.configure(text="▶")
-                return
+        ver = data.get("version", "")
+        is_expanded = self._ver_card_expanded.get(ver, False)
+        self._ver_card_expanded[ver] = not is_expanded
+
+        if is_expanded:
+            for w in card.winfo_children():
+                if hasattr(w, '_is_detail') and w._is_detail:
+                    w.destroy()
+                    for btn in card.winfo_children():
+                        for child in btn.winfo_children():
+                            if hasattr(child, 'cget') and child.cget("text") in ("▼", "▶"):
+                                child.configure(text="▶")
+                    return
 
         card_bg = card.cget("fg_color")
         detail = ctk.CTkFrame(card, fg_color=card_bg)
@@ -1624,7 +1758,7 @@ class GarbageCleanupTool:
     def _render_git_tab(self):
         git_header = ctk.CTkFrame(self._ver_scroll, fg_color=COLOR_BG)
         git_header.pack(fill="x", padx=10, pady=(6, 2))
-        ctk.CTkLabel(git_header, text="🔀 Git 版本切换", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+        ctk.CTkLabel(git_header, text="🔀 Git版本历史", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
                     text_color="#42A5F5").pack(side="left", padx=4)
         ctk.CTkButton(git_header, text="刷新历史", width=70, height=24, fg_color="#2a2a2a", hover_color="#3a3a3a",
                      text_color="#aaa", font=ctk.CTkFont(family=FONT_FAMILY, size=11),
@@ -1645,31 +1779,22 @@ class GarbageCleanupTool:
 
     def _get_project_root(self):
         if getattr(sys, 'frozen', False):
-            return os.path.dirname(os.path.dirname(sys.executable))
+            dev_dir = self._get_dev_dir()
+            if os.path.isdir(os.path.join(dev_dir, ".git")):
+                return dev_dir
+            parent = os.path.dirname(dev_dir)
+            if os.path.isdir(os.path.join(parent, ".git")):
+                return parent
+            return dev_dir
         return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     def _get_dev_dir(self):
-        if getattr(sys, 'frozen', False):
-            exe_dir = os.path.dirname(sys.executable)
-            search_dir = exe_dir
-            for _ in range(5):
-                if os.path.exists(os.path.join(search_dir, ".yunji.lock")):
-                    return search_dir
-                if os.path.exists(os.path.join(search_dir, "app")):
-                    return search_dir
-                parent = os.path.dirname(search_dir)
-                if parent == search_dir:
-                    break
-                search_dir = parent
-            if os.path.basename(exe_dir) == "ver":
-                return os.path.dirname(exe_dir)
-            return exe_dir
-        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return _find_dev_dir()
 
     def _read_token(self, filename):
         try:
             dev_dir = self._get_dev_dir()
-            app_dir = os.path.join(dev_dir, "app")
+            app_dir = os.path.join(dev_dir, _CFG["paths"]["app"])
             for search_dir in [app_dir, dev_dir]:
                 path = os.path.join(search_dir, filename)
                 if os.path.exists(path):
@@ -1705,7 +1830,7 @@ class GarbageCleanupTool:
 
     def _list_stable_exes(self):
         dev_dir = self._get_dev_dir()
-        ver_dir = os.path.join(dev_dir, "ver")
+        ver_dir = os.path.join(dev_dir, _CFG["paths"]["ver"])
         if not os.path.isdir(ver_dir):
             return []
         import re
@@ -1722,17 +1847,20 @@ class GarbageCleanupTool:
 
     def _get_local_version_history(self):
         dev_dir = self._get_dev_dir()
-        path = os.path.join(dev_dir, "app", "version_history.json")
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-            return []
-        except Exception:
-            return []
+        for rel_path in [_CFG["paths"]["version_json"], os.path.join(_CFG["paths"]["app"], "version_history.json")]:
+            path = os.path.join(dev_dir, rel_path)
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    return data
+                if isinstance(data, dict) and "versions" in data:
+                    return data["versions"]
+            except Exception:
+                continue
+        return []
 
     def _get_git_history(self, limit=30):
         if not self._is_git_repo():
@@ -1760,6 +1888,21 @@ class GarbageCleanupTool:
 
         current_version = VERSION
 
+        def _is_placeholder_changes(changes):
+            if not changes:
+                return True
+            if len(changes) == 1 and re.match(r'^版本\s+\S+\s+构建$', changes[0]):
+                return True
+            return False
+
+        meaningful_by_date = {}
+        for v in local_versions:
+            ch = v.get("changes", [])
+            if not _is_placeholder_changes(ch):
+                date_key = v.get("date", "")
+                if date_key and date_key not in meaningful_by_date:
+                    meaningful_by_date[date_key] = ch
+
         local_ver_set = set()
         all_versions = []
         import re
@@ -1769,11 +1912,20 @@ class GarbageCleanupTool:
             ver_num = m.group(1) if m else ver
             if not ver_num:
                 continue
+            changes = v.get("changes", [])
+            if _is_placeholder_changes(changes):
+                date_key = v.get("date", "")
+                if date_key in meaningful_by_date:
+                    changes = meaningful_by_date[date_key]
+                elif ver_num == current_version:
+                    changes = []
+                else:
+                    continue
             local_ver_set.add(ver_num)
             all_versions.append({
                 "version": ver_num,
                 "name": v.get("name", f"v{ver_num}"),
-                "changes": v.get("changes", []),
+                "changes": changes,
                 "build_time": v.get("build_time", v.get("date", "")),
                 "git_commit": v.get("git_commit", ""),
                 "available": ver_num in exe_versions,
@@ -1800,9 +1952,13 @@ class GarbageCleanupTool:
             self._ver_stable_data = all_versions
             self._ver_git_data = git_commits
             self._ver_current_version = current_version
+            self._ver_card_expanded = {}
+            for v in all_versions:
+                if v["version"] == current_version:
+                    self._ver_card_expanded[v["version"]] = True
             self._render_active_tab()
             if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
-                self._ver_status_label.configure(text=f"稳定版 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
+                self._ver_status_label.configure(text=f"软件版本 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
 
         self.root.after(0, update_ui)
 
@@ -1813,11 +1969,9 @@ class GarbageCleanupTool:
             w.destroy()
 
         if not all_versions:
-            ctk.CTkLabel(self._ver_stable_container, text="暂无稳定版本",
+            ctk.CTkLabel(self._ver_stable_container, text="暂无软件版本",
                         font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=COLOR_DIM).pack(padx=12, pady=10)
             return
-
-        expanded = self._ver_expanded
 
         for v in all_versions:
             ver = v["version"]
@@ -1860,7 +2014,7 @@ class GarbageCleanupTool:
                 ctk.CTkLabel(header, text="🆕 远程新版本", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
                             text_color="#42A5F5").pack(side="left", padx=4)
             elif is_available and exe_info:
-                ctk.CTkLabel(header, text="📦 含EXE稳定版", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                ctk.CTkLabel(header, text="📦 含软件版本", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
                             text_color="#FF9800").pack(side="left", padx=4)
                 if exe_info.get("size_mb"):
                     ctk.CTkLabel(header, text=f"{exe_info['size_mb']}MB", font=ctk.CTkFont(family="Consolas", size=10),
@@ -1875,8 +2029,10 @@ class GarbageCleanupTool:
                              command=lambda p=exe_info["path"], gc=v.get("git_commit", ""): self._switch_to_exe(p, gc)).pack(side="right", padx=4)
 
             has_detail = bool(changes) or bool(v.get("git_commit", ""))
+            card_expanded = self._ver_card_expanded.get(ver, False)
+
             if has_detail:
-                toggle_text = "▼" if expanded else "▶"
+                toggle_text = "▼" if card_expanded else "▶"
                 toggle_btn = ctk.CTkButton(header, text=toggle_text, width=24, height=22,
                                            fg_color=card_bg, hover_color="#2a2a2a",
                                            text_color="#888", font=ctk.CTkFont(family=FONT_FAMILY, size=10),
@@ -1884,8 +2040,9 @@ class GarbageCleanupTool:
                                            command=lambda c=card, v_data=v: self._toggle_card_detail(c, v_data, "stable"))
                 toggle_btn.pack(side="right", padx=2)
 
-            if expanded and has_detail:
+            if card_expanded and has_detail:
                 detail = ctk.CTkFrame(card, fg_color=card_bg)
+                detail._is_detail = True
                 detail.pack(fill="x", padx=10, pady=(0, 6))
 
                 git_commit = v.get("git_commit", "")
@@ -1911,7 +2068,7 @@ class GarbageCleanupTool:
             w.destroy()
 
         if not self._is_git_repo():
-            ctk.CTkLabel(self._ver_git_container, text="当前不是 Git 仓库，无法使用 Git 版本切换",
+            ctk.CTkLabel(self._ver_git_container, text="当前不是 Git 仓库，无法查看 Git版本历史",
                         font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color="#555").pack(pady=20)
             return
 
@@ -1984,35 +2141,35 @@ class GarbageCleanupTool:
 
     def _do_check_remote(self):
         try:
-            import subprocess
-            project_root = self._get_project_root()
-            git_dir = os.path.join(project_root, ".git")
-            if not os.path.isdir(git_dir):
-                raise Exception("未找到Git仓库，无法检查远程更新")
+            remote_data = self._fetch_remote_version_json()
+            if remote_data is None:
+                raise Exception("无法获取远程版本信息")
 
-            fetch_result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True,
-                                         cwd=project_root, timeout=30,
-                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-            if fetch_result.returncode != 0:
-                raise Exception(f"git fetch 失败: {fetch_result.stderr.strip()}")
-
-            show_result = subprocess.run(["git", "show", "origin/main:ver/version.json"],
-                                        capture_output=True, text=True, cwd=project_root, timeout=10,
-                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-            if show_result.returncode != 0:
-                raise Exception(f"获取远程version.json失败: {show_result.stderr.strip()}")
-
-            data = json.loads(show_result.stdout)
-            remote_latest = data.get("latest", "")
-            remote_versions = {v["version"]: v for v in data.get("versions", [])}
+            remote_latest = remote_data.get("latest", "")
+            remote_versions = {v["version"]: v for v in remote_data.get("versions", [])}
 
             stable_exes = self._list_stable_exes()
             exe_versions = {e["version"]: e for e in stable_exes}
             local_versions = self._get_local_version_history()
             git_commits = self._get_git_history(30)
 
-            import re
             current_version = VERSION
+
+            def _is_placeholder_changes(changes):
+                if not changes:
+                    return True
+                if len(changes) == 1 and re.match(r'^版本\s+\S+\s+构建$', changes[0]):
+                    return True
+                return False
+
+            meaningful_by_date = {}
+            for v in local_versions:
+                ch = v.get("changes", [])
+                if not _is_placeholder_changes(ch):
+                    date_key = v.get("date", "")
+                    if date_key and date_key not in meaningful_by_date:
+                        meaningful_by_date[date_key] = ch
+
             local_ver_set = set()
             all_versions = []
 
@@ -2022,11 +2179,20 @@ class GarbageCleanupTool:
                 ver_num = m.group(1) if m else ver
                 if not ver_num:
                     continue
+                changes = v.get("changes", [])
+                if _is_placeholder_changes(changes):
+                    date_key = v.get("date", "")
+                    if date_key in meaningful_by_date:
+                        changes = meaningful_by_date[date_key]
+                    elif ver_num == current_version:
+                        changes = []
+                    else:
+                        continue
                 local_ver_set.add(ver_num)
                 all_versions.append({
                     "version": ver_num,
                     "name": v.get("name", f"v{ver_num}"),
-                    "changes": v.get("changes", []),
+                    "changes": changes,
                     "build_time": v.get("build_time", v.get("date", "")),
                     "git_commit": v.get("git_commit", ""),
                     "available": ver_num in exe_versions,
@@ -2069,6 +2235,10 @@ class GarbageCleanupTool:
                 self._ver_stable_data = all_versions
                 self._ver_git_data = git_commits
                 self._ver_current_version = current_version
+                self._ver_card_expanded = {}
+                for v in all_versions:
+                    if v["version"] == current_version:
+                        self._ver_card_expanded[v["version"]] = True
                 has_update = remote_latest and remote_latest != VERSION and remote_latest not in exe_versions
                 if has_update:
                     self._ver_info_text = f"🆕 发现新版本 v{remote_latest}"
@@ -2076,11 +2246,63 @@ class GarbageCleanupTool:
                     self._ver_info_text = "✅ 已是最新版本"
                 self._render_active_tab()
                 if self._ver_status_label is not None and self._ver_status_label.winfo_exists():
-                    self._ver_status_label.configure(text=f"稳定版 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
+                    self._ver_status_label.configure(text=f"软件版本 {len(all_versions)} 个 | Git提交 {len(git_commits)} 条")
 
             self.root.after(0, update_ui)
         except Exception as e:
             self.root.after(0, lambda: self._ver_status_label.configure(text=f"检查失败: {e}") if self._ver_status_label is not None and self._ver_status_label.winfo_exists() else None)
+
+    def _fetch_remote_version_json(self):
+        project_root = self._get_project_root()
+        git_dir = os.path.join(project_root, ".git")
+        if os.path.isdir(git_dir):
+            return self._fetch_version_via_git(project_root)
+        return self._fetch_version_via_http()
+
+    def _fetch_version_via_git(self, project_root):
+        import subprocess
+        fetch_result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True,
+                                     cwd=project_root, timeout=30,
+                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        if fetch_result.returncode != 0:
+            return self._fetch_version_via_http()
+
+        fallback_paths = [VERSION_JSON_PATH]
+        alt = "ver/version.json" if VERSION_JSON_PATH != "ver/version.json" else "release/version.json"
+        fallback_paths.append(alt)
+
+        for branch in ["main", "master"]:
+            for vj_path in fallback_paths:
+                show_result = subprocess.run(["git", "show", f"origin/{branch}:{vj_path}"],
+                                            capture_output=True, text=True, cwd=project_root, timeout=10,
+                                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                if show_result.returncode == 0:
+                    try:
+                        return json.loads(show_result.stdout)
+                    except Exception:
+                        pass
+
+        return self._fetch_version_via_http()
+
+    def _fetch_version_via_http(self):
+        import urllib.request
+        import urllib.error
+        fallback_paths = [VERSION_JSON_PATH]
+        alt = "ver/version.json" if VERSION_JSON_PATH != "ver/version.json" else "release/version.json"
+        fallback_paths.append(alt)
+        urls = []
+        for path in fallback_paths:
+            urls.append(f"https://gitee.com/{GITEE_REPO}/raw/main/{path}")
+        for path in fallback_paths:
+            urls.append(f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{path}")
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "YunJiCleanup"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except Exception:
+                continue
+        return None
 
     def _switch_to_exe(self, exe_path, git_commit=""):
         if not os.path.exists(exe_path):

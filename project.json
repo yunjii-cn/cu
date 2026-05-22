@@ -1,0 +1,17 @@
+{
+    "brand_name": "云集智能文件清理专家",
+    "repos": {
+        "github": "yunjii-cn/cu",
+        "gitee": "yunjii/cu"
+    },
+    "paths": {
+        "version_json": "release/version.json",
+        "dev": "dev",
+        "app": "app",
+        "ver": "ver",
+        "dist": "dist",
+        "build": "build",
+        "release": "release",
+        "lock_file": ".yunji.lock"
+    }
+}
