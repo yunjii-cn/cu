@@ -2261,10 +2261,13 @@ class GarbageCleanupTool:
 
     def _fetch_version_via_git(self, project_root):
         import subprocess
-        fetch_result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True,
-                                     cwd=project_root, timeout=30,
-                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        if fetch_result.returncode != 0:
+        try:
+            fetch_result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True,
+                                         cwd=project_root, timeout=30,
+                                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            if fetch_result.returncode != 0:
+                return self._fetch_version_via_http()
+        except (FileNotFoundError, OSError):
             return self._fetch_version_via_http()
 
         fallback_paths = [VERSION_JSON_PATH]
@@ -2273,9 +2276,12 @@ class GarbageCleanupTool:
 
         for branch in ["main", "master"]:
             for vj_path in fallback_paths:
-                show_result = subprocess.run(["git", "show", f"origin/{branch}:{vj_path}"],
-                                            capture_output=True, text=True, cwd=project_root, timeout=10,
-                                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                try:
+                    show_result = subprocess.run(["git", "show", f"origin/{branch}:{vj_path}"],
+                                                capture_output=True, text=True, cwd=project_root, timeout=10,
+                                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                except (FileNotFoundError, OSError):
+                    return self._fetch_version_via_http()
                 if show_result.returncode == 0:
                     try:
                         return json.loads(show_result.stdout)
