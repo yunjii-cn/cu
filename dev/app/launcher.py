@@ -1,221 +1,153 @@
 import sys
 import os
+import ctypes
+import ctypes.wintypes
 import time
-import re
-import shutil
-import subprocess
 
-APP_BASE_NAME = "云集智能文件清理专家"
-APP_EXE_NAME = "云集智能文件清理专家.exe"
-LOCK_FILE = ".yunji.lock"
+BRAND_NAME = "云集智能文件清理专家"
 
+if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+    _log_path = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "startup.log")
 
-def _create_hardlink(src, dst):
-    try:
-        if os.path.exists(dst):
-            os.remove(dst)
-        os.link(src, dst)
-        return True
-    except Exception:
-        pass
-    try:
-        if os.path.exists(dst):
-            os.remove(dst)
-        shutil.copy2(src, dst)
-        return True
-    except Exception:
-        return False
-
-
-def _find_dev_dir_by_lock(exe_path):
-    exe_dir = os.path.dirname(exe_path)
-    search_dir = exe_dir
-    for _ in range(5):
-        if os.path.exists(os.path.join(search_dir, LOCK_FILE)):
-            return search_dir
-        if os.path.exists(os.path.join(search_dir, "app")):
-            return search_dir
-        parent = os.path.dirname(search_dir)
-        if parent == search_dir:
-            break
-        search_dir = parent
-    return None
-
-
-def _find_dev_dir(exe_path):
-    result = _find_dev_dir_by_lock(exe_path)
-    if result is not None:
-        return result
-    exe_dir = os.path.dirname(exe_path)
-    if os.path.basename(exe_dir) == "ver":
-        return os.path.dirname(exe_dir)
-    if os.path.exists(os.path.join(exe_dir, "ver")):
-        return exe_dir
-    return None
-
-
-def _cleanup_root_versioned_exes(dev_dir, current_exe_path):
-    ver_dir = os.path.join(dev_dir, "ver")
-    if not os.path.isdir(ver_dir):
-        return
-    for f in os.listdir(dev_dir):
-        if not re.search(r'-v\d{4}\.\d{2}\.\d{2}\.\d{4}', f):
-            continue
-        if not f.lower().endswith('.exe'):
-            continue
-        root_exe = os.path.join(dev_dir, f)
-        if os.path.abspath(root_exe) == current_exe_path:
-            continue
-        ver_exe = os.path.join(ver_dir, f)
-        if os.path.exists(ver_exe):
+    class _LogWriter:
+        def __init__(self, path):
+            self._path = path
+        def write(self, s):
             try:
-                os.remove(root_exe)
+                with open(self._path, "a", encoding="utf-8") as f:
+                    f.write(s)
             except Exception:
                 pass
-
-
-def _self_deploy(exe_path):
-    exe_dir = os.path.dirname(exe_path)
-    exe_name = os.path.basename(exe_path)
-
-    deploy_dir = os.path.join(exe_dir, APP_BASE_NAME)
-    os.makedirs(deploy_dir, exist_ok=True)
-
-    ver_dir = os.path.join(deploy_dir, "ver")
-    os.makedirs(ver_dir, exist_ok=True)
-
-    app_dir = os.path.join(deploy_dir, "app")
-    os.makedirs(app_dir, exist_ok=True)
-
-    lock_path = os.path.join(deploy_dir, LOCK_FILE)
-    if not os.path.exists(lock_path):
-        with open(lock_path, "w", encoding="utf-8") as f:
-            f.write(APP_BASE_NAME)
-
-    m = re.search(r'-v\d{4}\.\d{2}\.\d{2}\.\d{4}', exe_name)
-    if m:
-        ver_exe = os.path.join(ver_dir, exe_name)
-        if not os.path.exists(ver_exe):
-            try:
-                shutil.copy2(exe_path, ver_exe)
-            except Exception:
-                ver_exe = exe_path
-
-        dev_exe = os.path.join(deploy_dir, APP_EXE_NAME)
-        try:
-            if os.path.exists(dev_exe) and os.path.samefile(dev_exe, ver_exe):
-                return deploy_dir
-        except Exception:
+        def flush(self):
             pass
-        _create_hardlink(ver_exe, dev_exe)
-    else:
-        dev_exe = os.path.join(deploy_dir, APP_EXE_NAME)
-        if not os.path.exists(dev_exe):
-            try:
-                shutil.copy2(exe_path, dev_exe)
-            except Exception:
-                pass
+        def isatty(self):
+            return False
 
-    return deploy_dir
+    sys.stdout = _LogWriter(_log_path)
+    sys.stderr = _LogWriter(_log_path)
+
+    print(f"[launcher] sys.executable = {sys.executable}")
+    print(f"[launcher] cwd = {os.getcwd()}")
+    print(f"[launcher] argv = {sys.argv}")
 
 
-def _relocate_if_needed():
-    if not getattr(sys, 'frozen', False):
+def _verify_brand():
+    if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
+        return
+    exe_name = os.path.basename(sys.executable)
+    if BRAND_NAME not in exe_name:
+        correct_name = f"{BRAND_NAME}.exe"
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            f"可执行文件名已被修改，无法运行。\n\n当前文件名: {exe_name}\n正确文件名: {correct_name}\n\n请将文件名改回「{correct_name}」后重试。",
+            "品牌校验失败",
+            0x10
+        )
+        sys.exit(1)
+    print(f"[launcher] 品牌验证通过: {exe_name}")
+
+
+_verify_brand()
+
+
+def _kill_old_instances():
+    if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
         return
 
-    exe_path = os.path.abspath(sys.executable)
-    exe_dir = os.path.dirname(exe_path)
-    exe_name = os.path.basename(exe_path)
+    my_exe = os.path.normcase(os.path.abspath(sys.executable))
+    my_pid = ctypes.windll.kernel32.GetCurrentProcessId()
 
-    dev_dir = _find_dev_dir(exe_path)
-    if dev_dir is not None:
-        _cleanup_root_versioned_exes(dev_dir, exe_path)
-        lock_path = os.path.join(dev_dir, LOCK_FILE)
-        if not os.path.exists(lock_path):
-            with open(lock_path, "w", encoding="utf-8") as f:
-                f.write(APP_BASE_NAME)
+    base_prefix = BRAND_NAME
+
+    kernel32 = ctypes.windll.kernel32
+
+    TH32CS_SNAPPROCESS = 0x00000002
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", ctypes.wintypes.DWORD),
+            ("cntUsage", ctypes.wintypes.DWORD),
+            ("th32ProcessID", ctypes.wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+            ("th32ModuleID", ctypes.wintypes.DWORD),
+            ("cntThreads", ctypes.wintypes.DWORD),
+            ("th32ParentProcessID", ctypes.wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", ctypes.wintypes.DWORD),
+            ("szExeFile", ctypes.c_wchar * 260),
+        ]
+
+    snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snap == INVALID_HANDLE_VALUE:
+        print("[launcher] 无法创建进程快照")
         return
 
-    m = re.search(r'-v\d{4}\.\d{2}\.\d{2}\.\d{4}', exe_name)
-    if m:
-        deploy_dir = _self_deploy(exe_path)
-        return
+    entry = PROCESSENTRY32W()
+    entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
 
-    if os.path.basename(exe_dir) == "ver":
-        return
+    pids_to_kill = []
 
-    dev_dir = exe_dir
-    ver_dir = os.path.join(dev_dir, "ver")
-    os.makedirs(ver_dir, exist_ok=True)
+    if kernel32.Process32FirstW(snap, ctypes.byref(entry)):
+        while True:
+            pid = entry.th32ProcessID
+            exe_name = entry.szExeFile.lower()
+            if pid != my_pid and exe_name.startswith(base_prefix.lower()) and exe_name.endswith('.exe'):
+                pids_to_kill.append(pid)
+                print(f"[launcher] 发现旧进程: pid={pid}, name={exe_name}")
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            if not kernel32.Process32NextW(snap, ctypes.byref(entry)):
+                break
 
-    lock_path = os.path.join(dev_dir, LOCK_FILE)
-    if not os.path.exists(lock_path):
-        with open(lock_path, "w", encoding="utf-8") as f:
-            f.write(APP_BASE_NAME)
+    kernel32.CloseHandle(snap)
 
-    if m:
-        ver_exe = os.path.join(ver_dir, exe_name)
-        if not os.path.exists(ver_exe):
-            _create_hardlink(exe_path, ver_exe)
-
-        dev_exe = os.path.join(dev_dir, APP_EXE_NAME)
-        try:
-            if os.path.exists(dev_exe) and os.path.samefile(dev_exe, ver_exe):
-                return
-        except Exception:
-            pass
-        _create_hardlink(ver_exe, dev_exe)
-
-
-_relocate_if_needed()
-
-if sys.platform == 'win32':
-    try:
-        import psutil
-        current_pid = os.getpid()
-        for proc in psutil.process_iter(['pid', 'name']):
-            try:
-                pname = proc.info['name']
-                if pname and pname.lower().startswith(APP_BASE_NAME) and pname.lower().endswith('.exe'):
-                    if proc.info['pid'] != current_pid:
-                        proc.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        time.sleep(0.3)
-    except Exception:
-        pass
-
-    try:
-        ctypes = __import__('ctypes')
-        EVENT_MODIFY_STATE = 0x0002
-        WAIT_OBJECT_0 = 0x00000000
-        INFINITE = 0xFFFFFFFF
-        INSTANCE_EVENT = "YunJiCleanup_SingleInstance_Event"
-
-        handle = ctypes.windll.kernel32.CreateEventW(None, True, False, INSTANCE_EVENT)
-        if handle == 0:
-            pass
-        elif ctypes.windll.kernel32.GetLastError() == 183:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            old = ctypes.windll.kernel32.OpenEventW(EVENT_MODIFY_STATE, False, INSTANCE_EVENT)
-            if old:
-                ctypes.windll.kernel32.SetEvent(old)
-                ctypes.windll.kernel32.CloseHandle(old)
-            time.sleep(0.3)
-            handle = ctypes.windll.kernel32.CreateEventW(None, True, False, INSTANCE_EVENT)
+    PROCESS_TERMINATE = 0x0001
+    for pid in pids_to_kill:
+        handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
         if handle:
-            def _wait_for_signal():
-                ctypes.windll.kernel32.WaitForSingleObject(handle, INFINITE)
-                ctypes.windll.kernel32.CloseHandle(handle)
-                os._exit(0)
-            t = __import__('threading').Thread(target=_wait_for_signal, daemon=True)
-            t.start()
+            kernel32.TerminateProcess(handle, 0)
+            kernel32.CloseHandle(handle)
 
-        ctypes.windll.kernel32.FreeConsole()
+    if pids_to_kill:
+        print(f"[launcher] 已终止 {len(pids_to_kill)} 个旧进程")
+        time.sleep(0.5)
+
+
+_kill_old_instances()
+
+_cleanup_path = ""
+for arg in sys.argv[1:]:
+    if arg.startswith("--cleanup="):
+        _cleanup_path = arg[len("--cleanup="):]
+
+if _cleanup_path and os.path.isfile(_cleanup_path):
+    print(f"[launcher] 清理旧文件: {_cleanup_path}")
+    for _ in range(10):
+        try:
+            os.remove(_cleanup_path)
+            break
+        except PermissionError:
+            time.sleep(0.5)
+
+print("[launcher] 开始导入 main 模块...")
+try:
+    import main
+    print("[launcher] main 模块导入成功，调用 main.main()...")
+    main.main()
+except Exception as _e:
+    import traceback
+    _tb = traceback.format_exc()
+    print(f"[launcher] 异常:\n{_tb}")
+    try:
+        _exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(_exe_dir, "crash.log"), "w", encoding="utf-8") as _lf:
+            _lf.write(_tb)
     except Exception:
         pass
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import main
-main.main()
+    ctypes.windll.user32.MessageBoxW(
+        0,
+        f"程序启动失败:\n\n{_tb[:2000]}\n\n错误日志已保存到: {_exe_dir}\\crash.log",
+        "启动错误",
+        0x10
+    )
+    sys.exit(1)

@@ -57,13 +57,18 @@ Desktop.ini
 # ========== 虚拟环境 ==========
 .venv/
 venv/
+Lib/
 
 # ========== 日志 ==========
 *.log
 
 # ========== 旧版代码目录 ==========
 BAK/
+archive/
 test/
 云集智能文件清理/
 nul
 dev/dev.zip
+
+# ========== 版本缓存 ==========
+dev/app/ver_cache.json
