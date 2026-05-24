@@ -7,28 +7,17 @@ import time
 BRAND_NAME = "云集智能文件清理专家"
 
 if sys.platform == 'win32' and getattr(sys, 'frozen', False):
-    _log_path = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "startup.log")
 
-    class _LogWriter:
-        def __init__(self, path):
-            self._path = path
+    class _NullWriter:
         def write(self, s):
-            try:
-                with open(self._path, "a", encoding="utf-8") as f:
-                    f.write(s)
-            except Exception:
-                pass
+            pass
         def flush(self):
             pass
         def isatty(self):
             return False
 
-    sys.stdout = _LogWriter(_log_path)
-    sys.stderr = _LogWriter(_log_path)
-
-    print(f"[launcher] sys.executable = {sys.executable}")
-    print(f"[launcher] cwd = {os.getcwd()}")
-    print(f"[launcher] argv = {sys.argv}")
+    sys.stdout = _NullWriter()
+    sys.stderr = _NullWriter()
 
 
 def _verify_brand():

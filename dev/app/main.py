@@ -16,7 +16,7 @@ if getattr(sys, 'frozen', False):
 
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, colorchooser
+from tkinter import filedialog, ttk, colorchooser
 from PIL import Image, ImageTk
 import json
 import hashlib
@@ -102,6 +102,108 @@ COLOR_DIM = "#888888"
 
 FONT_FAMILY = "Microsoft YaHei UI"
 FONT_FAMILY_MONO = "Consolas"
+
+
+class DarkDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title="", message="", dialog_type="info", yes_no=False):
+        super().__init__(parent)
+        self.title(title)
+        self.configure(fg_color=COLOR_BG)
+        self.resizable(False, False)
+        if parent:
+            self.transient(parent)
+        self.grab_set()
+        self._result = None
+
+        icons = {"info": "ℹ️", "warning": "⚠️", "error": "❌", "question": "❓"}
+        icon = icons.get(dialog_type, "ℹ️")
+
+        self.after(10, lambda: self.iconbitmap(""))
+        try:
+            self.iconbitmap(os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico"))
+        except Exception:
+            pass
+
+        main = ctk.CTkFrame(self, fg_color="#1e1e1e", corner_radius=8, border_width=1, border_color=COLOR_BORDER)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        header = ctk.CTkFrame(main, fg_color="#1e1e1e", height=36)
+        header.pack(fill="x", padx=8, pady=(8, 0))
+        header.pack_propagate(False)
+        ctk.CTkLabel(header, text=f"{icon}  {title}", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left", padx=8)
+
+        msg_frame = ctk.CTkFrame(main, fg_color="#1e1e1e")
+        msg_frame.pack(fill="both", expand=True, padx=16, pady=(8, 8))
+        ctk.CTkLabel(msg_frame, text=message, font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+                    text_color="#ccc", wraplength=380, justify="left").pack(anchor="w")
+
+        btn_frame = ctk.CTkFrame(main, fg_color="#1e1e1e")
+        btn_frame.pack(fill="x", padx=8, pady=(0, 10))
+
+        if yes_no:
+            ctk.CTkButton(btn_frame, text="确认", width=80, height=32, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                         text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+                         command=self._yes).pack(side="right", padx=6)
+            ctk.CTkButton(btn_frame, text="取消", width=80, height=32, fg_color="#333", hover_color="#555",
+                         text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+                         command=self._no).pack(side="right", padx=6)
+        else:
+            ctk.CTkButton(btn_frame, text="确定", width=80, height=32, fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT,
+                         text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+                         command=self._ok).pack(side="right", padx=6)
+
+        self.update_idletasks()
+        w = max(self.winfo_reqwidth(), 300)
+        h = max(self.winfo_reqheight(), 160)
+        if parent and parent.winfo_exists():
+            x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
+            y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
+        else:
+            x = (self.winfo_screenwidth() - w) // 2
+            y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.minsize(w, h)
+
+        self.bind("<Return>", lambda e: self._yes() if yes_no else self._ok())
+        self.bind("<Escape>", lambda e: self._no() if yes_no else self._ok())
+        self.protocol("WM_DELETE_WINDOW", self._no if yes_no else self._ok)
+        self.wait_window()
+
+    def _ok(self):
+        self._result = True
+        self.destroy()
+
+    def _yes(self):
+        self._result = True
+        self.destroy()
+
+    def _no(self):
+        self._result = False
+        self.destroy()
+
+    def get(self):
+        return self._result
+
+
+def dark_info(parent, title, message):
+    d = DarkDialog(parent, title, message, "info")
+    return d.get()
+
+
+def dark_warning(parent, title, message):
+    d = DarkDialog(parent, title, message, "warning")
+    return d.get()
+
+
+def dark_error(parent, title, message):
+    d = DarkDialog(parent, title, message, "error")
+    return d.get()
+
+
+def dark_askyesno(parent, title, message):
+    d = DarkDialog(parent, title, message, "question", yes_no=True)
+    return d.get()
 
 CATEGORY_COLORS_DEFAULT = {
     "temp": "#4a2020",
@@ -343,8 +445,6 @@ CATEGORY_TREE = {
 
 CATEGORY_TO_CHECKBOX = {}
 for _cid, _cinfo in CATEGORY_TREE.items():
-    _cname = _cinfo["name"]
-    CATEGORY_TO_CHECKBOX[_cname] = _cid
     if "extensions" in _cinfo:
         for _ext, _desc in _cinfo["extensions"].items():
             CATEGORY_TO_CHECKBOX[_desc] = _cid
@@ -354,6 +454,8 @@ for _cid, _cinfo in CATEGORY_TREE.items():
     if "name_patterns" in _cinfo:
         for _pat, _desc in _cinfo["name_patterns"]:
             CATEGORY_TO_CHECKBOX[_desc] = _cid
+for _cid, _cinfo in CATEGORY_TREE.items():
+    CATEGORY_TO_CHECKBOX[_cinfo["name"]] = _cid
 CATEGORY_TO_CHECKBOX["广告图片"] = "ad_image"
 CATEGORY_TO_CHECKBOX["广告链接"] = "ad_link"
 CATEGORY_TO_CHECKBOX["重复文件"] = "duplicates"
@@ -499,7 +601,7 @@ def _self_deploy(exe_dir):
     exe_basename = os.path.basename(src_exe)
     if BRAND_NAME not in exe_basename:
         correct_name = f"{BRAND_NAME}.exe"
-        messagebox.showerror("品牌校验失败",
+        dark_error(None, "品牌校验失败",
             f"可执行文件名已被修改，无法运行。\n\n当前文件名: {exe_basename}\n正确文件名: {correct_name}\n\n请将文件名改回「{correct_name}」后重试。")
         sys.exit(1)
 
@@ -682,6 +784,7 @@ class GarbageCleanupTool:
         self.category_colors = {**CATEGORY_COLORS_DEFAULT, **self.settings.get("category_colors", {})}
         self.column_widths = self.settings.get("column_widths", COLUMN_WIDTHS_DEFAULT.copy())
         self.custom_rules = self.settings.get("custom_rules", [])
+        self._table_font_size = self.settings.get("table_font_size", 14)
 
         self._pending_ui_updates = []
         self._last_ui_flush = 0.0
@@ -719,6 +822,12 @@ class GarbageCleanupTool:
 
         self.setup_ui()
         self._set_icon()
+        self.root.after(100, self._bring_to_front)
+
+    def _bring_to_front(self):
+        self.root.attributes("-topmost", True)
+        self.root.focus_force()
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
 
     def _on_closing(self):
         try:
@@ -772,15 +881,17 @@ class GarbageCleanupTool:
 
         style = ttk.Style()
         style.theme_use('clam')
+        fs = self._table_font_size
+        rh = max(28, fs + 18)
         style.configure("Dark.Treeview",
                        background=COLOR_BG, foreground=COLOR_TEXT,
                        fieldbackground=COLOR_BG, borderwidth=0,
-                       font=('Microsoft YaHei UI', 12), rowheight=32, relief="flat",
+                       font=('Microsoft YaHei UI', fs), rowheight=rh, relief="flat",
                        bordercolor=COLOR_BG, lightcolor=COLOR_BG, darkcolor=COLOR_BG)
         style.configure("Dark.Treeview.Heading",
                        background="#252525", foreground=COLOR_TEXT,
                        borderwidth=0, relief="flat",
-                       font=('Microsoft YaHei UI', 12, 'bold'),
+                       font=('Microsoft YaHei UI', fs, 'bold'),
                        bordercolor="#252525", lightcolor="#252525", darkcolor="#252525")
         style.map("Dark.Treeview",
                  background=[('selected', COLOR_RED), ('active', '#2a2a2a')],
@@ -1153,13 +1264,6 @@ class GarbageCleanupTool:
         self._auto_save()
 
     def sync_selection_with_categories(self):
-        active = set()
-        for cid, var in self.preset_vars.items():
-            if var.get():
-                active.add(cid)
-        if self.custom_enabled_var.get():
-            active.add("custom")
-
         batch_check = []
         batch_uncheck = []
         for item in self.tree.get_children():
@@ -1167,8 +1271,7 @@ class GarbageCleanupTool:
             tags = self.tree.item(item, "tags")
             file_path = tags[0] if tags else ""
             category = values[6] if len(values) > 6 else ""
-            cat_key = CATEGORY_TO_CHECKBOX.get(category, "")
-            if cat_key and cat_key in active:
+            if self._is_category_selected(category):
                 self.selected_files.add(file_path)
                 batch_check.append(item)
             else:
@@ -1176,12 +1279,18 @@ class GarbageCleanupTool:
                 batch_uncheck.append(item)
         for item in batch_check:
             vals = list(self.tree.item(item, "values"))
-            vals[0] = "☑"
-            self.tree.item(item, values=vals)
+            vals[0] = "✔"
+            tags = list(self.tree.item(item, "tags"))
+            if "sel" not in tags:
+                tags.append("sel")
+            self.tree.item(item, values=vals, tags=tuple(tags))
         for item in batch_uncheck:
             vals = list(self.tree.item(item, "values"))
             vals[0] = "☐"
-            self.tree.item(item, values=vals)
+            tags = list(self.tree.item(item, "tags"))
+            if "sel" in tags:
+                tags.remove("sel")
+            self.tree.item(item, values=vals, tags=tuple(tags))
         self._recompute_selected_size()
         self._update_selected_size_display()
 
@@ -1404,7 +1513,7 @@ class GarbageCleanupTool:
             with open(fpath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if not isinstance(data, dict) or "name" not in data or "categories" not in data:
-                messagebox.showerror("导入失败", "无效的规则包格式，需包含name和categories字段")
+                dark_error(self.root, "导入失败", "无效的规则包格式，需包含name和categories字段")
                 return
             rule_id = f"custom_{int(time.time())}"
             PRESET_RULE_PACKS[rule_id] = data
@@ -1415,9 +1524,9 @@ class GarbageCleanupTool:
             self.settings["custom_rule_packs"] = custom_packs
             save_settings(self.settings)
             self._destroy_current_panel()
-            messagebox.showinfo("导入成功", f"规则包 '{data['name']}' 已导入")
+            dark_info(self.root, "导入成功", f"规则包 '{data['name']}' 已导入")
         except Exception as e:
-            messagebox.showerror("导入失败", f"读取文件出错: {e}")
+            dark_error(self.root, "导入失败", f"读取文件出错: {e}")
 
     def _export_custom_rule_pack(self):
         fpath = filedialog.asksaveasfilename(title="导出规则包", defaultextension=".json",
@@ -1430,7 +1539,7 @@ class GarbageCleanupTool:
             if rule:
                 export_data[rule_id] = rule
         if not export_data:
-            messagebox.showwarning("导出失败", "没有已激活的规则包可导出")
+            dark_warning(self.root, "导出失败", "没有已激活的规则包可导出")
             return
         try:
             merged = {"name": "自定义规则包", "desc": "导出的规则包合集",
@@ -1438,9 +1547,9 @@ class GarbageCleanupTool:
                      "extensions": {k: v for rid, r in export_data.items() for k, v in r.get("extensions", {}).items()}}
             with open(fpath, 'w', encoding='utf-8') as f:
                 json.dump(merged, f, ensure_ascii=False, indent=2)
-            messagebox.showinfo("导出成功", f"规则包已导出到: {fpath}")
+            dark_info(self.root, "导出成功", f"规则包已导出到: {fpath}")
         except Exception as e:
-            messagebox.showerror("导出失败", f"写入文件出错: {e}")
+            dark_error(self.root, "导出失败", f"写入文件出错: {e}")
 
     def toggle_analysis_report(self):
         if self._current_panel_type == "analysis":
@@ -1596,8 +1705,12 @@ class GarbageCleanupTool:
                                               text_color=COLOR_DIM)
         self._ver_status_label.pack(side="right", padx=(8, 4))
 
-        self._ver_scroll = ctk.CTkScrollableFrame(page, fg_color=COLOR_BG, corner_radius=0)
+        self._ver_scroll = ctk.CTkScrollableFrame(page, fg_color=COLOR_BG, corner_radius=0,
+                                                   scrollbar_fg_color="#1a1a1a",
+                                                   scrollbar_button_color="#3a3a3a",
+                                                   scrollbar_button_hover_color="#4a4a4a")
         self._ver_scroll.pack(fill="both", expand=True, padx=0, pady=0)
+        self._ver_scroll._scrollbar.configure(width=14)
 
         self._ver_stable_data = []
         self._ver_git_data = []
@@ -2296,7 +2409,7 @@ class GarbageCleanupTool:
 
     def _switch_to_exe(self, exe_path, git_commit=""):
         if not os.path.exists(exe_path):
-            messagebox.showerror("错误", f"版本文件不存在:\n{exe_path}")
+            dark_error(self.root, "错误", f"版本文件不存在:\n{exe_path}")
             return
 
         dev_dir = self._get_dev_dir()
@@ -2328,7 +2441,7 @@ class GarbageCleanupTool:
 
     def _switch_git_commit(self, commit_hash):
         if not self._is_git_repo():
-            messagebox.showerror("错误", "不是 Git 仓库，无法切换版本")
+            dark_error(self.root, "错误", "不是 Git 仓库，无法切换版本")
             return
 
         r = self._run_git("stash")
@@ -2336,7 +2449,7 @@ class GarbageCleanupTool:
 
         r = self._run_git("checkout", commit_hash, timeout=60)
         if not r["ok"]:
-            messagebox.showerror("切换失败", f"Git checkout 失败:\n{r['stderr'][:200]}")
+            dark_error(self.root, "切换失败", f"Git checkout 失败:\n{r['stderr'][:200]}")
             if stashed:
                 self._run_git("stash", "pop")
             return
@@ -2352,7 +2465,7 @@ class GarbageCleanupTool:
             subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
             self.root.destroy()
         else:
-            messagebox.showinfo("切换成功", f"已切换到 commit {commit_hash}\n请重启软件以加载新版本。")
+            dark_info(self.root, "切换成功", f"已切换到 commit {commit_hash}\n请重启软件以加载新版本。")
             self._refresh_git_history()
 
     def _do_verify_and_build_report_bg(self):
@@ -2400,13 +2513,13 @@ class GarbageCleanupTool:
             elif top_size > 100 * 1024 * 1024:
                 advice_lines.append(f"   → 建议清理，可释放 >100MB")
             idx += 1
-            if cat_counts.get("duplicates", 0) > 0:
-                advice_lines.append(f"{idx}. 发现 {cat_counts['duplicates']} 个重复文件 → 使用'重复检测'去重")
+            if cat_counts.get("重复文件", 0) > 0:
+                advice_lines.append(f"{idx}. 发现 {cat_counts['重复文件']} 个重复文件 → 使用'重复检测'去重")
                 idx += 1
-            if cat_counts.get("empty_folders", 0) > 10:
-                advice_lines.append(f"{idx}. 发现 {cat_counts['empty_folders']} 个空文件夹 → 可安全批量删除")
+            if cat_counts.get("空文件夹", 0) > 10:
+                advice_lines.append(f"{idx}. 发现 {cat_counts['空文件夹']} 个空文件夹 → 可安全批量删除")
                 idx += 1
-            if cat_counts.get("cache", 0) + cat_counts.get("sys_cache", 0) > 50:
+            if cat_counts.get("缓存文件", 0) > 50:
                 advice_lines.append(f"{idx}. 缓存文件较多 → 建议定期清理缓存")
                 idx += 1
         advice_lines.append("\n⚠️ 清理前建议备份重要文件 | 系统文件谨慎处理 | 建议使用'删除到回收站'")
@@ -2448,14 +2561,14 @@ class GarbageCleanupTool:
                                              command=self.tree.yview,
                                              fg_color="#1a1a1a", button_color="#3a3a3a",
                                              button_hover_color="#4a4a4a", corner_radius=4,
-                                             width=8)
+                                             width=14)
         self.scrollbar_x = ctk.CTkScrollbar(tree_container, orientation="horizontal",
                                              command=self.tree.xview,
                                              fg_color="#1a1a1a", button_color="#3a3a3a",
                                              button_hover_color="#4a4a4a", corner_radius=4,
-                                             height=8)
+                                             height=14)
 
-        self.tree.heading("选择", text="☑", command=self.toggle_select_all)
+        self.tree.heading("选择", text="✔", command=self.toggle_select_all)
         self.tree.heading("文件名", text="文件名 ▲▼", command=lambda: self.sort_by_column("文件名"))
         self.tree.heading("完整路径", text="完整路径 ▲▼", command=lambda: self.sort_by_column("完整路径"))
         self.tree.heading("大小", text="大小 ▲▼", command=lambda: self.sort_by_column("大小"))
@@ -2464,9 +2577,12 @@ class GarbageCleanupTool:
         self.tree.heading("分类", text="分类 ▲▼", command=lambda: self.sort_by_column("分类"))
 
         for col in columns:
-            w = self.column_widths.get(col, COLUMN_WIDTHS_DEFAULT.get(col, 100))
-            mw = COLUMN_MIN_WIDTHS.get(col, 55)
-            self.tree.column(col, width=w, minwidth=mw, stretch=True)
+            if col == "选择":
+                self.tree.column(col, width=30, minwidth=30, stretch=False, anchor="center")
+            else:
+                w = self.column_widths.get(col, COLUMN_WIDTHS_DEFAULT.get(col, 100))
+                mw = COLUMN_MIN_WIDTHS.get(col, 55)
+                self.tree.column(col, width=w, minwidth=mw, stretch=True)
 
         self._snapshot_column_widths()
 
@@ -2474,9 +2590,10 @@ class GarbageCleanupTool:
             tag_name = f"cat_{cat_id}"
             text_color = CATEGORY_TEXT_COLORS.get(cat_id, COLOR_TEXT)
             self.tree.tag_configure(tag_name, background=color, foreground=text_color)
+        self.tree.tag_configure("sel", foreground="#4CAF50")
 
         self.tree.bind("<Double-1>", self.on_item_double_click)
-        self.tree.bind("<ButtonPress-1>", self._on_col_press)
+        self.tree.bind("<ButtonPress-1>", self._on_tree_press)
         self.tree.bind("<ButtonRelease-1>", self._on_col_release)
         self.tree.bind("<Motion>", self._on_col_motion)
 
@@ -2507,7 +2624,7 @@ class GarbageCleanupTool:
         def get_cat_color(cat_name):
             cid = name_to_id.get(cat_name, "")
             if cid:
-                return self.category_colors.get(cid, "#333333")
+                return CATEGORY_TEXT_COLORS.get(cid, self.category_colors.get(cid, "#333333"))
             return "#333333"
 
         canvas.delete("all")
@@ -2543,7 +2660,7 @@ class GarbageCleanupTool:
         def get_cat_color(cat_name):
             cid = name_to_id.get(cat_name, "")
             if cid:
-                return self.category_colors.get(cid, "#333333")
+                return CATEGORY_TEXT_COLORS.get(cid, self.category_colors.get(cid, "#333333"))
             return "#333333"
 
         def get_cat_text_color(cat_name):
@@ -2611,12 +2728,17 @@ class GarbageCleanupTool:
     def _snapshot_column_widths(self):
         self._prev_column_widths = {}
         try:
-            for col in ("选择", "文件名", "完整路径", "大小", "修改时间", "类型", "分类"):
+            for col in ("文件名", "完整路径", "大小", "修改时间", "类型", "分类"):
                 self._prev_column_widths[col] = self.tree.column(col, "width")
         except Exception:
             pass
 
-    def _on_col_press(self, event):
+    def _on_tree_press(self, event):
+        col = self.tree.identify_column(event.x)
+        item = self.tree.identify_row(event.y)
+        if col == "#1" and item:
+            self._toggle_item_selection(item)
+            return "break"
         self._snapshot_column_widths()
 
     def _on_col_motion(self, event):
@@ -2627,7 +2749,7 @@ class GarbageCleanupTool:
             return
         try:
             changed = False
-            for col in ("选择", "文件名", "完整路径", "大小", "修改时间", "类型", "分类"):
+            for col in ("文件名", "完整路径", "大小", "修改时间", "类型", "分类"):
                 cur_w = self.tree.column(col, "width")
                 prev_w = self._prev_column_widths.get(col, cur_w)
                 if cur_w != prev_w:
@@ -2640,7 +2762,7 @@ class GarbageCleanupTool:
 
     def _save_column_widths(self):
         try:
-            for col in ("选择", "文件名", "完整路径", "大小", "修改时间", "类型", "分类"):
+            for col in ("文件名", "完整路径", "大小", "修改时间", "类型", "分类"):
                 w = self.tree.column(col, "width")
                 mw = COLUMN_MIN_WIDTHS.get(col, 55)
                 self.column_widths[col] = max(w, mw)
@@ -2659,6 +2781,9 @@ class GarbageCleanupTool:
 
         btn_row = ctk.CTkFrame(status_info, fg_color=COLOR_BG)
         btn_row.pack(side="right", padx=5)
+        ctk.CTkButton(btn_row, text="🔤 字体", width=60, height=26, fg_color="#333", hover_color="#555",
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                     command=self._show_font_menu).pack(side="left", padx=2)
         ctk.CTkButton(btn_row, text="清空列表", width=70, height=26, fg_color="#333", hover_color="#555",
                      text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=11),
                      command=self.clear_file_list).pack(side="left", padx=2)
@@ -2867,26 +2992,43 @@ class GarbageCleanupTool:
         key = CATEGORY_TO_CHECKBOX.get(category, "")
         return f"cat_{key}" if key else ""
 
+    def _is_category_selected(self, category):
+        cat_key = CATEGORY_TO_CHECKBOX.get(category, "")
+        if not cat_key:
+            return False
+        var = self.preset_vars.get(cat_key)
+        if isinstance(var, ctk.BooleanVar):
+            return var.get()
+        if cat_key == "custom":
+            return self.custom_enabled_var.get()
+        parent_id = CATEGORY_TREE.get(cat_key, {}).get("parent")
+        if parent_id:
+            parent_var = self.preset_vars.get(parent_id)
+            if isinstance(parent_var, ctk.BooleanVar):
+                return parent_var.get()
+        return False
+
     def _do_ui_insert(self, file_infos):
         for fi in file_infos:
             fp = fi["path"]
-            cat_key = CATEGORY_TO_CHECKBOX.get(fi["category"], "")
-            is_sel = cat_key and self.preset_vars.get(cat_key, self.custom_enabled_var if cat_key == "custom" else None)
-            if isinstance(is_sel, ctk.BooleanVar):
-                is_sel = is_sel.get()
-            else:
+            is_sel = self._is_category_selected(fi["category"])
+            if not is_sel:
                 is_sel = fp in self.selected_files
             if is_sel:
                 self.selected_files.add(fp)
                 self.selected_size += fi["size"]
             tag = self._get_cat_tag(fi["category"])
-            tags = (tag, fp) if tag else (fp,)
+            tags_list = [fp]
+            if tag:
+                tags_list.append(tag)
+            if is_sel:
+                tags_list.append("sel")
             self.tree.insert("", "end",
-                           values=("☑" if is_sel else "☐", fi["name"], fp,
+                           values=("✔" if is_sel else "☐", fi["name"], fp,
                                   self.format_size(fi["size"]),
                                   datetime.fromtimestamp(fi["mtime"]).strftime("%Y-%m-%d %H:%M:%S"),
                                   fi["type"], fi["category"]),
-                           tags=tags)
+                           tags=tuple(tags_list))
         tf = len(self.filtered_files)
         tsm = round(self.total_size / (1024*1024), 2)
         self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB" + (f" (显示前{self._max_display}条)" if tf > self._max_display else ""))
@@ -2930,7 +3072,7 @@ class GarbageCleanupTool:
     def start_scan(self):
         directory = self.dir_entry.get().strip()
         if not directory or not os.path.isdir(directory):
-            messagebox.showwarning("输入错误", "请选择有效的扫描目录")
+            dark_warning(self.root, "输入错误", "请选择有效的扫描目录")
             return
         self.file_list.clear()
         self.filtered_files.clear()
@@ -2958,10 +3100,10 @@ class GarbageCleanupTool:
     def start_duplicate_scan(self):
         directory = self.dir_entry.get().strip()
         if not directory or not os.path.isdir(directory):
-            messagebox.showwarning("输入错误", "请选择有效的扫描目录")
+            dark_warning(self.root, "输入错误", "请选择有效的扫描目录")
             return
         if self.scanning:
-            messagebox.showwarning("提示", "请等待当前操作完成")
+            dark_warning(self.root, "提示", "请等待当前操作完成")
             return
         self.file_list.clear()
         self.filtered_files.clear()
@@ -3115,13 +3257,15 @@ class GarbageCleanupTool:
                     if not is_keep:
                         self.selected_files.add(fi["path"])
                         self.selected_size += fi["size"]
-                    tags = (tag_name, fi["path"])
+                    tags_list = [fi["path"], tag_name]
+                    if not is_keep:
+                        tags_list.append("sel")
                     self.tree.insert("", "end",
-                                   values=("☑" if not is_keep else "☐", fi["name"], fi["path"],
+                                   values=("✔" if not is_keep else "☐", fi["name"], fi["path"],
                                           self.format_size(fi["size"]),
                                           datetime.fromtimestamp(fi["mtime"]).strftime("%Y-%m-%d %H:%M:%S"),
                                           fi["type"], cat_label),
-                                   tags=tags)
+                                   tags=tuple(tags_list))
                     group_total += 1
 
             waste_size = sum(fi["size"] for g in dup_groups for fi in g[1:])
@@ -3215,7 +3359,7 @@ class GarbageCleanupTool:
             fp = tags[1] if len(tags) > 1 else tags[0]
             vals = list(self.tree.item(item, "values"))
             is_sel = fp in self.selected_files
-            vals[0] = "☑" if is_sel else "☐"
+            vals[0] = "✔" if is_sel else "☐"
             cat_idx = 6
             if is_sel:
                 vals[cat_idx] = "重复文件"
@@ -3227,7 +3371,12 @@ class GarbageCleanupTool:
                         else:
                             vals[cat_idx] = "重复文件"
                         break
-            self.tree.item(item, values=vals)
+            tags = list(self.tree.item(item, "tags"))
+            if is_sel and "sel" not in tags:
+                tags.append("sel")
+            elif not is_sel and "sel" in tags:
+                tags.remove("sel")
+            self.tree.item(item, values=vals, tags=tuple(tags))
         self._update_selected_size_display()
 
     def _head_hash(self, fp, hs=4096):
@@ -3324,7 +3473,7 @@ class GarbageCleanupTool:
 
     def save_current_progress(self):
         if not self.file_list:
-            messagebox.showinfo("提示", "当前没有扫描结果可保存")
+            dark_info(self.root, "提示", "当前没有扫描结果可保存")
             return
         save_dir = filedialog.askdirectory(title="选择保存目录")
         if not save_dir:
@@ -3342,27 +3491,27 @@ class GarbageCleanupTool:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             self.status_label.configure(text=f"💾 进度已保存到 {os.path.basename(save_path)}")
         except Exception as e:
-            messagebox.showerror("保存失败", str(e))
+            dark_error(self.root, "保存失败", str(e))
 
     def display_files(self):
         self.clear_table()
-        batch = []
         for fi in self.filtered_files:
             fp = fi["path"]
-            cat_key = CATEGORY_TO_CHECKBOX.get(fi["category"], "")
-            is_sel = cat_key and self.preset_vars.get(cat_key, self.custom_enabled_var if cat_key == "custom" else None)
-            if isinstance(is_sel, ctk.BooleanVar):
-                is_sel = is_sel.get()
-            else:
+            is_sel = self._is_category_selected(fi["category"])
+            if not is_sel:
                 is_sel = fp in self.selected_files
             tag = self._get_cat_tag(fi["category"])
-            tags = (tag, fp) if tag else (fp,)
+            tags_list = [fp]
+            if tag:
+                tags_list.append(tag)
+            if is_sel:
+                tags_list.append("sel")
             self.tree.insert("", "end",
-                           values=("☑" if is_sel else "☐", fi["name"], fp,
+                           values=("✔" if is_sel else "☐", fi["name"], fp,
                                   self.format_size(fi["size"]),
                                   datetime.fromtimestamp(fi["mtime"]).strftime("%Y-%m-%d %H:%M:%S"),
                                   fi["type"], fi["category"]),
-                           tags=tags)
+                           tags=tuple(tags_list))
         tf = len(self.filtered_files)
         tsm = round(self.total_size / (1024*1024), 2)
         self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB")
@@ -3371,6 +3520,28 @@ class GarbageCleanupTool:
     def clear_table(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
+
+    def _show_font_menu(self):
+        menu = tk.Menu(self.root, tearoff=0, bg="#2a2a2a", fg=COLOR_TEXT,
+                      activebackground=COLOR_RED, activeforeground=COLOR_TEXT,
+                      font=('Microsoft YaHei UI', 11))
+        for size in [10, 11, 12, 13, 14, 16, 18]:
+            label = f"{size}pt" + (" ✓" if size == self._table_font_size else "")
+            menu.add_command(label=label, command=lambda s=size: self._apply_table_font(s))
+        try:
+            menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        finally:
+            menu.grab_release()
+
+    def _apply_table_font(self, size):
+        self._table_font_size = size
+        self.settings["table_font_size"] = size
+        save_settings(self.settings)
+        style = ttk.Style()
+        rh = max(28, size + 18)
+        style.configure("Dark.Treeview", font=('Microsoft YaHei UI', size), rowheight=rh)
+        style.configure("Dark.Treeview.Heading", font=('Microsoft YaHei UI', size, 'bold'))
+        self.display_files()
 
     def format_size(self, sb):
         if sb == 0: return "0 B"
@@ -3391,22 +3562,37 @@ class GarbageCleanupTool:
             self._recompute_selected_size()
         for item in self.tree.get_children():
             fp = self.tree.item(item, "tags")[0]
-            self.tree.item(item, values=("☑" if fp in self.selected_files else "☐", *self.tree.item(item, "values")[1:]))
+            is_sel = fp in self.selected_files
+            tags = list(self.tree.item(item, "tags"))
+            if is_sel and "sel" not in tags:
+                tags.append("sel")
+            elif not is_sel and "sel" in tags:
+                tags.remove("sel")
+            self.tree.item(item, values=("✔" if is_sel else "☐", *self.tree.item(item, "values")[1:]), tags=tuple(tags))
+        self._update_selected_size_display()
+
+    def _toggle_item_selection(self, item):
+        fp = self.tree.item(item, "tags")[0]
+        fi_size = self._file_size_map.get(fp, 0)
+        if fp in self.selected_files:
+            self.selected_files.remove(fp)
+            self.selected_size -= fi_size
+        else:
+            self.selected_files.add(fp)
+            self.selected_size += fi_size
+        is_sel = fp in self.selected_files
+        tags = list(self.tree.item(item, "tags"))
+        if is_sel and "sel" not in tags:
+            tags.append("sel")
+        elif not is_sel and "sel" in tags:
+            tags.remove("sel")
+        self.tree.item(item, values=("✔" if is_sel else "☐", *self.tree.item(item, "values")[1:]), tags=tuple(tags))
         self._update_selected_size_display()
 
     def on_item_double_click(self, event):
         item = self.tree.identify_row(event.y)
         if item:
-            fp = self.tree.item(item, "tags")[0]
-            fi_size = self._file_size_map.get(fp, 0)
-            if fp in self.selected_files:
-                self.selected_files.remove(fp)
-                self.selected_size -= fi_size
-            else:
-                self.selected_files.add(fp)
-                self.selected_size += fi_size
-            self.tree.item(item, values=("☑" if fp in self.selected_files else "☐", *self.tree.item(item, "values")[1:]))
-            self._update_selected_size_display()
+            self._toggle_item_selection(item)
 
     def add_custom_rule(self):
         text = self.custom_rule_entry.get().strip()
@@ -3418,7 +3604,7 @@ class GarbageCleanupTool:
         elif rtype == "regex":
             try: re.compile(text)
             except re.error:
-                messagebox.showerror("错误", f"'{text}' 不是有效的正则表达式")
+                dark_error(self.root, "错误", f"'{text}' 不是有效的正则表达式")
                 return
         rule = {"text": text, "type": rtype}
         self.custom_rules.append(rule)
@@ -3457,7 +3643,7 @@ class GarbageCleanupTool:
 
     def verify_results(self):
         if not self.file_list:
-            messagebox.showwarning("提示", "没有扫描结果")
+            dark_warning(self.root, "提示", "没有扫描结果")
             return
         self.status_label.configure(text="✅ 正在校验...")
 
@@ -3557,7 +3743,7 @@ class GarbageCleanupTool:
     def _restore_auto(self):
         data = load_scan_results()
         if not data:
-            messagebox.showinfo("提示", "没有找到自动保存的扫描结果")
+            dark_info(self.root, "提示", "没有找到自动保存的扫描结果")
             return
         self._do_restore(data)
 
@@ -3569,17 +3755,17 @@ class GarbageCleanupTool:
             with open(fp, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception as e:
-            messagebox.showerror("加载失败", f"无法读取进度文件:\n{e}")
+            dark_error(self.root, "加载失败", f"无法读取进度文件:\n{e}")
             return
         if not data.get("file_list"):
-            messagebox.showinfo("提示", "进度文件中没有扫描结果")
+            dark_info(self.root, "提示", "进度文件中没有扫描结果")
             return
         self._do_restore(data)
 
     def _do_restore(self, data):
         saved = data.get("file_list", [])
         if not saved:
-            messagebox.showinfo("提示", "没有可恢复的结果")
+            dark_info(self.root, "提示", "没有可恢复的结果")
             return
         self.status_label.configure(text="📂 正在恢复扫描结果...")
         self.root.update_idletasks()
@@ -3614,61 +3800,84 @@ class GarbageCleanupTool:
 
     def delete_selected_files(self):
         if not self.selected_files:
-            messagebox.showwarning("提示", "请先选择文件")
+            dark_warning(self.root, "提示", "请先选择文件")
             return
         mode = self.delete_mode
         mn = {"permanent": "彻底删除", "recycle": "删除到回收站", "move": f"移动到 {self.delete_move_dir}", "compress": f"压缩为 {self._get_zip_name()}"}
-        if not messagebox.askyesno("确认", f"处理 {len(self.selected_files)} 个文件？\n方式: {mn.get(mode, '彻底删除')}"):
+        if not dark_askyesno(self.root, "确认", f"处理 {len(self.selected_files)} 个文件？\n方式: {mn.get(mode, '彻底删除')}"):
             return
-        ok = fail = 0
-        to_compress = []
-        for fp in list(self.selected_files):
-            try:
-                if os.path.isfile(fp):
-                    sz = os.path.getsize(fp)
-                    if mode == "permanent": os.remove(fp)
-                    elif mode == "recycle": self._recycle(fp)
-                    elif mode == "move": self._move(fp)
-                    elif mode == "compress": to_compress.append(fp); continue
-                elif os.path.isdir(fp):
-                    if mode == "permanent": os.rmdir(fp)
-                    elif mode == "recycle": self._recycle(fp)
-                    elif mode == "move": self._move(fp)
-                    elif mode == "compress": to_compress.append(fp); continue
+
+        files_to_delete = list(self.selected_files)
+        self.status_label.configure(text=f"⏳ 正在处理 {len(files_to_delete)} 个文件...")
+        self.scan_btn.configure(state="disabled")
+
+        def do_delete():
+            ok = fail = 0
+            to_compress = []
+            deleted_paths = set()
+            for fp in files_to_delete:
+                try:
+                    if os.path.isfile(fp):
+                        sz = os.path.getsize(fp)
+                        if mode == "permanent": os.remove(fp)
+                        elif mode == "recycle": self._recycle(fp)
+                        elif mode == "move": self._move(fp)
+                        elif mode == "compress": to_compress.append(fp); continue
+                    elif os.path.isdir(fp):
+                        if mode == "permanent": os.rmdir(fp)
+                        elif mode == "recycle": self._recycle(fp)
+                        elif mode == "move": self._move(fp)
+                        elif mode == "compress": to_compress.append(fp); continue
+                    else:
+                        continue
+                    ok += 1
+                    deleted_paths.add(fp)
+                except Exception:
+                    fail += 1
+
+            if mode == "compress" and to_compress:
+                if self._compress(to_compress, self._get_zip_name()):
+                    for fp in to_compress:
+                        try:
+                            if os.path.isfile(fp):
+                                sz = os.path.getsize(fp)
+                                os.remove(fp)
+                                ok += 1
+                                deleted_paths.add(fp)
+                            elif os.path.isdir(fp):
+                                os.rmdir(fp)
+                                ok += 1
+                                deleted_paths.add(fp)
+                        except Exception:
+                            fail += 1
                 else:
-                    continue
-                ok += 1
-                self.total_size -= sz if os.path.isfile(fp) else 0
-                self.selected_files.discard(fp)
-                self.file_list = [f for f in self.file_list if f["path"] != fp]
-                self.filtered_files = [f for f in self.filtered_files if f["path"] != fp]
-                for item in self.tree.get_children():
-                    if self.tree.item(item, "tags")[0] == fp:
-                        self.tree.delete(item); break
-            except Exception:
-                fail += 1
-        if mode == "compress" and to_compress:
-            if self._compress(to_compress, self._get_zip_name()):
-                for fp in to_compress:
-                    try:
-                        sz = os.path.getsize(fp) if os.path.isfile(fp) else 0
-                        os.remove(fp); ok += 1; self.total_size -= sz
-                        self.selected_files.discard(fp)
-                        self.file_list = [f for f in self.file_list if f["path"] != fp]
-                        self.filtered_files = [f for f in self.filtered_files if f["path"] != fp]
-                        for item in self.tree.get_children():
-                            if self.tree.item(item, "tags")[0] == fp: self.tree.delete(item); break
-                    except Exception:
-                        fail += 1
-            else:
-                fail += len(to_compress)
-        self._auto_save_results()
-        self._recompute_selected_size()
-        messagebox.showinfo("完成", f"成功: {ok}\n失败: {fail}")
-        tf = len(self.filtered_files)
-        tsm = round(self.total_size / (1024*1024), 2)
-        self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB")
-        self._update_selected_size_display()
+                    fail += len(to_compress)
+
+            def update_ui():
+                if deleted_paths:
+                    self.selected_files -= deleted_paths
+                    self.file_list = [f for f in self.file_list if f["path"] not in deleted_paths]
+                    self.filtered_files = [f for f in self.filtered_files if f["path"] not in deleted_paths]
+                    for item in list(self.tree.get_children()):
+                        try:
+                            tags = self.tree.item(item, "tags")
+                            if tags and tags[0] in deleted_paths:
+                                self.tree.delete(item)
+                        except Exception:
+                            pass
+                self._recompute_selected_size()
+                self._auto_save_results()
+                dark_info(self.root, "完成", f"成功: {ok}\n失败: {fail}")
+                tf = len(self.filtered_files)
+                tsm = round(self.total_size / (1024*1024), 2)
+                self.count_label.configure(text=f"📊 文件: {tf} | 总大小: {tsm} MB")
+                self._update_selected_size_display()
+                self.status_label.configure(text="✅ 准备就绪")
+                self.scan_btn.configure(state="normal")
+
+            self.root.after(0, update_ui)
+
+        threading.Thread(target=do_delete, daemon=True).start()
 
     def _get_zip_name(self):
         n = self.delete_zip_name
