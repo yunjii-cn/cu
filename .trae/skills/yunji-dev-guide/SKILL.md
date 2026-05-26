@@ -86,8 +86,8 @@ description: "云集智能文件清理专家项目开发规范。Invoke when wor
 ┌─────────────────────────────────────────────────────────┐
 │  2. 打包阶段                                             │
 │     双击 打包.bat 或 python build/build.py               │
-│     → EXE输出到 dev/ver/云集智能文件清理专家-v版本号.exe    │
-│     → 创建硬链接 dev/云集智能文件清理专家.exe → ver中的EXE  │
+│     → EXE输出到 dev/dist/云集智能文件清理专家-v版本号.exe   │
+│     → 创建硬链接 dev/云集智能文件清理专家.exe → dist中的EXE │
 └──────────────────────┬──────────────────────────────────┘
                        │ 双击 dev/云集智能文件清理专家.exe 测试
                        │ 确认稳定
@@ -315,8 +315,8 @@ python build/build.py
 1. 动态生成版本号：`YYYY.MM.DD.HHMM`
 2. 将版本号注入 `dev/app/main.py` 和 `version_info.txt`
 3. PyInstaller 从 `launcher.py` 构建 EXE（`--onefile` 模式）
-4. EXE 移动到 `dev/ver/` 目录
-5. 在 `dev/` 创建硬链接入口 `云集智能文件清理专家.exe`
+4. EXE 移动到 `dev/dist/` 目录
+5. 在 `dev/` 创建硬链接入口 `云集智能文件清理专家.exe`（指向 `dev/dist/` 中的EXE）
 6. 构建完成后恢复源代码中的版本号
 
 **构建下载器**：
@@ -358,7 +358,8 @@ When working on this project, follow these rules:
 - 构建命令：`python build/build.py`
 - 版本号格式：`YYYY.MM.DD.HHMM`，由构建脚本动态生成
 - 构建完成后源码中的版本号会被恢复，不要手动修改版本号
-- EXE 输出到 `dev/ver/` 目录，硬链接入口在 `dev/` 目录
+- EXE 输出到 `dev/dist/` 目录，硬链接入口在 `dev/` 目录
+- **`dev/ver/` 目录由用户手动管理**，构建脚本不会将EXE复制到ver/。测试确认稳定后，用户手动将EXE从dist移入ver
 - **构建前必须测试**: `python -c "import sys; sys.path.insert(0, 'dev/app'); import main"` 确保代码能正常加载
 - CustomTkinter 的 CTkScrollbar 不支持 `scrollbar_color`/`scrollbar_hover_color`，应使用 `button_color`/`button_hover_color`
 

@@ -1326,8 +1326,10 @@ class GarbageCleanupTool:
         rec = self.settings.get("recommended", recommend_params(sys_info))
         hw_row = ctk.CTkFrame(panel, fg_color="#252525")
         hw_row.pack(fill="x", padx=10, pady=(8, 4))
+        ctk.CTkLabel(hw_row, text="硬件配置：", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                    text_color=COLOR_TEXT).pack(side="left")
         ctk.CTkLabel(hw_row, text=f"💻 {sys_info['total_ram_gb']}GB | {sys_info['cpu_physical']}核{sys_info['cpu_logical']}线程",
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_DIM).pack(side="left")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_DIM).pack(side="left", padx=(0, 8))
         params_row = ctk.CTkFrame(panel, fg_color="#252525")
         params_row.pack(fill="x", padx=10, pady=4)
         entries = {}
@@ -1344,9 +1346,6 @@ class GarbageCleanupTool:
             entry.pack(side="left", padx=(0, 2))
             entry.insert(0, current)
             entries[key] = entry
-        btn_row = ctk.CTkFrame(panel, fg_color="#252525")
-        btn_row.pack(fill="x", padx=10, pady=(4, 8))
-
         def apply_rec():
             for key, _, _, default in items:
                 entries[key].delete(0, "end")
@@ -1369,8 +1368,8 @@ class GarbageCleanupTool:
             entries[key].bind("<Return>", lambda e: save_inline())
             entries[key].bind("<FocusOut>", lambda e: save_inline())
 
-        ctk.CTkButton(btn_row, text="应用推荐值", height=26, fg_color="#333", hover_color=COLOR_RED,
-                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=apply_rec).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(hw_row, text="应用推荐值", height=26, fg_color="#333", hover_color=COLOR_RED,
+                     text_color=COLOR_TEXT, font=ctk.CTkFont(family=FONT_FAMILY, size=12), command=apply_rec).pack(side="left")
 
     def toggle_delete_settings_panel(self):
         if self._current_panel_type == "delete":
@@ -1390,7 +1389,7 @@ class GarbageCleanupTool:
                               fg_color=COLOR_RED, hover_color=COLOR_RED_LIGHT, text_color=COLOR_TEXT,
                               font=ctk.CTkFont(family=FONT_FAMILY, size=12)).pack(side="left", padx=5)
         detail_row = ctk.CTkFrame(panel, fg_color="#252525")
-        detail_row.pack(fill="x", padx=10, pady=4)
+        detail_row.pack(fill="x", padx=10, pady=(4, 8))
         ctk.CTkLabel(detail_row, text="移动目录", font=ctk.CTkFont(family=FONT_FAMILY, size=12), text_color=COLOR_TEXT).pack(side="left", padx=(0, 4))
         move_dir_entry = ctk.CTkEntry(detail_row, placeholder_text="选择移动目标文件夹...",
                                      fg_color="#2a2a2a", border_color="#444", text_color=COLOR_TEXT,
@@ -1413,8 +1412,6 @@ class GarbageCleanupTool:
         zip_name_entry.pack(side="left", padx=(0, 4))
         zip_name_entry.insert(0, self.delete_zip_name)
         ctk.CTkLabel(detail_row, text="{date}=日期 {time}=时间", font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=COLOR_DIM).pack(side="left")
-        btn_row = ctk.CTkFrame(panel, fg_color="#252525")
-        btn_row.pack(fill="x", padx=10, pady=(4, 8))
 
         def save_del():
             self.delete_mode = del_mode_var.get()
